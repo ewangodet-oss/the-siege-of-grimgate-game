@@ -16,7 +16,7 @@ CLIENT_ID = "1528119038171938876"     # Application ID Discord du jeu (public)
 
 # Boutons affiches sous le statut (visibles/cliquables par les AUTRES qui
 # regardent le profil du joueur). Max 2. URL vide = bouton non affiche.
-URL_ITCH = ""                          # page itch.io du jeu (a remplir)
+URL_ITCH = "https://skakayy.itch.io/the-siege-of-grimgate"
 URL_GITHUB = "https://github.com/ewangodet-oss/the-siege-of-grimgate-game"
 
 _OP_HANDSHAKE = 0
