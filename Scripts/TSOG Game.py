@@ -51,6 +51,7 @@ _assurer_dependances()
 import pygame, json, random, math
 import classes
 import reseau
+import discord_rp
 from classes import (Button, Lysandra, Kenshi, KonradForgeval, Arinya, Stormr, Oswald, Barrion,
                      TrainingDummy,
                      KEYBINDS, KEYBINDS_DEFAULT, assombrir_nuit, reset_caches_combat,
@@ -154,6 +155,10 @@ def _verifier_maj_thread():
 
 import threading as _threading
 _threading.Thread(target=_verifier_maj_thread, daemon=True).start()
+
+# Rich Presence Discord ("Joue a The Siege of Grimgate") : thread silencieux,
+# ne fait rien si le client Discord n'est pas ouvert sur le PC du joueur.
+discord_rp.demarrer()
 
 def lancer_update():
     """Copie l'updater PowerShell dans TEMP (il doit survivre au remplacement de
@@ -2135,6 +2140,7 @@ def _dessiner_popup_maj(mouse_pos):
 
 def menu_accueil(fade_in=False, perso1="Kenshi", perso2="Lysandra"):
     """Écran d'accueil"""
+    discord_rp.maj("In the menus")
     ambiance_menu(True)        # vent de fond
     jouer_musique(MUSIQUE_MENU)   # musique du menu principal (boucle)
     # Hierarchie visuelle : "Enter the Battle" = bouton HEROS (grand, texte imposant),
@@ -3901,6 +3907,10 @@ def jeu(personnage_1, personnage_2, net=None):
     set_sol(MAPS.get(MAP_ACTUELLE, {}).get("ground", 850))           # niveau du sol par map
     MAP_ECHELLE = MAPS.get(MAP_ACTUELLE, {}).get("scale", 1.0)       # taille des persos par map
     jouer_musique(MAPS.get(MAP_ACTUELLE, {}).get("music", MUSIQUE_MENU))
+    # Statut Discord : "Kenshi vs Stormr" + mode et map
+    _mode_rp = "LAN" if net else ("Solo" if IA_NIVEAU else "Local")
+    discord_rp.maj("%s vs %s" % (personnage_1, personnage_2),
+                   "%s - %s" % (_mode_rp, _mp.get("label", "")))
     jouer_ambiance_map(MAP_ACTUELLE)   # ambiances de la map (boucle + superposees)
     ROUNDS_TO_WIN = 2          # premier a 2 rounds gagnes remporte le match
     ROUND_TIME = 120           # secondes par round (2 min) ; la mort subite n'arrive
@@ -5040,6 +5050,7 @@ def jouer_entrainement(perso):
     ambiance_menu(False)                               # coupe le VENT du menu (temple = ambiance de map)
     jouer_musique(MAPS[MAP].get("music", MUSIQUE_MENU))
     jouer_ambiance_map(MAP)
+    discord_rp.maj("Training as %s" % perso, MAPS[MAP].get("label", ""))
     particules.clear()
 
     def _creer(nom):
