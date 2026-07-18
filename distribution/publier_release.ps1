@@ -42,7 +42,8 @@ foreach ($f in 'Jouer TSOG.bat', 'README.md', 'LICENSE') {
     if (Test-Path $p) { Copy-Item $p $staging }
 }
 Write-Host 'Copie de python_portable...'
-robocopy $pyPortable (Join-Path $staging 'python_portable') /E /NFL /NDL /NJH /NJS | Out-Null
+robocopy $pyPortable (Join-Path $staging 'python_portable') /E /NFL /NDL /NJH /NJS `
+    /XD __pycache__ | Out-Null
 
 # --- manifeste de version : liste exacte des fichiers du build. L'updater s'en
 # --- sert pour SUPPRIMER les fichiers obsoletes (renommes/retires) chez le joueur.
