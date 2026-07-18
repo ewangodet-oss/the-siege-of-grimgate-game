@@ -8,7 +8,7 @@ param([switch]$SansRelease)   # -SansRelease : construit juste le zip, sans publ
 
 $ErrorActionPreference = 'Stop'
 $repoDir  = Split-Path -Parent $PSScriptRoot                      # racine du repo
-$pyPortable = 'C:\Perso\Projet Algosss\The Siege Of Grimgate_beta-1.0\python_portable'
+$pyPortable = Join-Path $repoDir 'python_portable'   # dans le repo (gitignore, jamais commite)
 $githubRepo = 'ewangodet-oss/the-siege-of-grimgate-game'
 
 # --- version depuis le code (source unique) ---
