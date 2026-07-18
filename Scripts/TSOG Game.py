@@ -3907,10 +3907,15 @@ def jeu(personnage_1, personnage_2, net=None):
     set_sol(MAPS.get(MAP_ACTUELLE, {}).get("ground", 850))           # niveau du sol par map
     MAP_ECHELLE = MAPS.get(MAP_ACTUELLE, {}).get("scale", 1.0)       # taille des persos par map
     jouer_musique(MAPS.get(MAP_ACTUELLE, {}).get("music", MUSIQUE_MENU))
-    # Statut Discord : "Kenshi vs Stormr" + mode et map
+    # Statut Discord : "Kenshi vs Stormr" + mode/map, vignette de la map en grande
+    # image et portrait du joueur LOCAL en pastille (en LAN : mon_cote dit qui je suis).
     _mode_rp = "LAN" if net else ("Solo" if IA_NIVEAU else "Local")
+    _map_rp = "temple" if MAP_ACTUELLE == "temple_day" else MAP_ACTUELLE
+    _perso_rp = personnage_2 if (net and getattr(net, "mon_cote", "Left") == "Right") else personnage_1
     discord_rp.maj("%s vs %s" % (personnage_1, personnage_2),
-                   "%s - %s" % (_mode_rp, _mp.get("label", "")))
+                   "%s - %s" % (_mode_rp, _mp.get("label", "")),
+                   grande=_map_rp, grande_txt=_mp.get("label", ""),
+                   petite=_perso_rp.lower(), petite_txt=_perso_rp)
     jouer_ambiance_map(MAP_ACTUELLE)   # ambiances de la map (boucle + superposees)
     ROUNDS_TO_WIN = 2          # premier a 2 rounds gagnes remporte le match
     ROUND_TIME = 120           # secondes par round (2 min) ; la mort subite n'arrive
@@ -5050,7 +5055,9 @@ def jouer_entrainement(perso):
     ambiance_menu(False)                               # coupe le VENT du menu (temple = ambiance de map)
     jouer_musique(MAPS[MAP].get("music", MUSIQUE_MENU))
     jouer_ambiance_map(MAP)
-    discord_rp.maj("Training as %s" % perso, MAPS[MAP].get("label", ""))
+    discord_rp.maj("Training as %s" % perso, MAPS[MAP].get("label", ""),
+                   grande="temple", grande_txt=MAPS[MAP].get("label", ""),
+                   petite=perso.lower(), petite_txt=perso)
     particules.clear()
 
     def _creer(nom):
