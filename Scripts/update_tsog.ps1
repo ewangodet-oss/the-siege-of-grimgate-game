@@ -52,6 +52,32 @@ try {
     robocopy $src $Install /E /NFL /NDL /NJH /NJS | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "File copy failed (robocopy code $LASTEXITCODE)." }
 
+    # Purge des fichiers OBSOLETES (presents chez le joueur mais retires du jeu),
+    # d'apres le manifest.json de la release. Perimetre STRICT : Scripts/ et
+    # assets/ uniquement ; on ne touche jamais aux fichiers per-PC (settings,
+    # marqueur pare-feu, raccourcis, __pycache__) ni a python_portable.
+    $manif = Join-Path $src 'manifest.json'
+    if (Test-Path $manif) {
+        $garde = @{}
+        foreach ($f in (Get-Content $manif -Raw | ConvertFrom-Json).files) {
+            $garde[$f.ToLower()] = $true
+        }
+        $purges = 0
+        foreach ($dossier in 'Scripts', 'assets') {
+            $base = Join-Path $Install $dossier
+            if (-not (Test-Path $base)) { continue }
+            Get-ChildItem $base -Recurse -File | ForEach-Object {
+                $rel = $_.FullName.Substring($Install.Length).TrimStart('\').Replace('\', '/')
+                if ($garde.ContainsKey($rel.ToLower())) { return }
+                if ($rel -match '(^|/)(settings\.json|\.mp_firewall_skip)$') { return }
+                if ($rel -like '*.lnk' -or $rel -like '*__pycache__*') { return }
+                Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+                $script:purges++
+            }
+        }
+        if ($purges) { Write-Host ("Removed {0} obsolete file(s)." -f $purges) }
+    }
+
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 

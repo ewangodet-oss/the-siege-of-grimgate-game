@@ -44,6 +44,16 @@ foreach ($f in 'Jouer TSOG.bat', 'README.md', 'LICENSE') {
 Write-Host 'Copie de python_portable...'
 robocopy $pyPortable (Join-Path $staging 'python_portable') /E /NFL /NDL /NJH /NJS | Out-Null
 
+# --- manifeste de version : liste exacte des fichiers du build. L'updater s'en
+# --- sert pour SUPPRIMER les fichiers obsoletes (renommes/retires) chez le joueur.
+Write-Host 'Generation du manifest.json...'
+$fichiers = Get-ChildItem $staging -Recurse -File | ForEach-Object {
+    $_.FullName.Substring($staging.Length + 1).Replace('\', '/')
+}
+@{ version = $version; files = @($fichiers) } | ConvertTo-Json |
+    Set-Content (Join-Path $staging 'manifest.json') -Encoding UTF8
+Write-Host ("  {0} fichiers listes." -f @($fichiers).Count)
+
 # --- zip ---
 $out = Join-Path $PSScriptRoot 'out'
 New-Item -ItemType Directory -Force $out | Out-Null
