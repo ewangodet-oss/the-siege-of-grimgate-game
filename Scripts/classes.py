@@ -325,6 +325,14 @@ class IA:
         if hasattr(moi, "WEAPONS") and getattr(moi, "switch_cd", 0) == 0 and dd > 200:
             self._special_cd = 60
             return Inputs(move2=True)                                         # arme suivante
+        # LYSANDRA : COUP SISMIQUE charge -- JAMAIS a bout portant (figee = sac de frappe
+        # face aux rapides) : a mi-distance seulement, avec parcimonie, charge courte en
+        # general et PLEINE (perce-garde) 3 fois sur 10 pour punir les turtles.
+        if cfg and cfg.get("seisme") and getattr(moi, "attack_cd", 0) == 0 \
+                and not getattr(moi, "attacking", False) and 260 < dd < 430:
+            self._special_cd = 110
+            n = 52 if self.rng.random() < 0.3 else 26
+            return self._enfiler([{"move2": True}] * n + [{}])
         return None
 
     def decide(self, moi, adv):
@@ -369,6 +377,11 @@ class IA:
         # === 0) SEQUENCE SPECIALE EN COURS (double-tap dash/spin, charge lance) : on la deroule. ===
         if self._file:
             return Inputs(**self._file.pop(0))
+        # === 0a) LYSANDRA : jamais FIGEE en charge sismique par ACCIDENT. Seule la tactique
+        # dediee (file ci-dessus) maintient move2 ; si un gel demarre parce que l'offense
+        # normale tenait le bouton, on relache IMMEDIATEMENT (charge quasi nulle).
+        if getattr(moi, "_seisme_gel", False):
+            return i
         # === 0b) SLAM Barrion : un saut-attaque est en vol -> on peut ECRASER (move2 en l'air). ===
         if getattr(moi, "jumping_attack", False) and not getattr(moi, "hit_down", False):
             return Inputs(move2=True) if self.rng.random() < 0.30 else i
@@ -754,6 +767,10 @@ def poussee(cible, depuis_x, degats):
     declaree non poussable (mannequin d'entrainement, fixe par design)."""
     if armure_lourde(cible) or not getattr(cible, "POUSSABLE", True):
         return
+    anc = getattr(cible, "ancrage_actif", None)
+    if anc is not None and anc():
+        cible._ancrage_nb = getattr(cible, "_ancrage_nb", 0) + 1   # compte (Moves Guide)
+        return                                     # ANCRAGE (Lysandra) : pas un pouce de recul
     force = min(140, 25 + 2.2 * degats)
     dirn = 1 if cible.rect.centerx >= depuis_x else -1
     cible.rect.x += int(dirn * force)
@@ -1354,6 +1371,11 @@ class Fighter:
         certaines actions (Flow de Kenshi sur les attaques)."""
         return cd
 
+    def perce_garde(self, target):
+        """True si le coup EN COURS ignore le blocage (seisme charge de Lysandra).
+        La parade parfaite, elle, reste toujours au-dessus."""
+        return False
+
     def check_collision(self, surface, target):
         """Vérifie si l'attaque touche l'adversaire et inflige les dégâts.
 
@@ -1394,7 +1416,7 @@ class Fighter:
                         self.blocked_hit = True
                     elif target.block and bloque_de_face and parade_parfaite(target):
                         riposte_parade(self, target)    # PARADE PARFAITE : rien pour la cible
-                    elif target.block == True and bloque_de_face:
+                    elif target.block == True and bloque_de_face and not self.perce_garde(target):
                         # Coup bloque : on encaisse des degats reduits et le
                         # bouclier se degrade, mais PAS de stun (target.hit) :
                         # l'anim de hit ne se joue pas et le bouclier reste affiche.
@@ -1468,9 +1490,26 @@ class Fighter:
 #----------------------------------------------------------------------------------------------------------------------
 
 class Lysandra(Fighter):
-    """Chevalier (Hero Knight) : 2 attaques a l'epee, bonne vie."""
+    """Chevalier (Hero Knight) - le JUGGERNAUT : lente, massive, inarretable.
+    Kit (aucune nouvelle animation, tout est code) :
+      - INEBRANLABLE : super-armure sur TOUS ses coups (config['armure']=(1,2)) -> un
+        coup encaisse pendant son attaque fait mal mais ne l'interrompt JAMAIS.
+      - MARCHE INARRETABLE : avancer VERS l'ennemi charge son 'poids' (jauge sous sa
+        barre de vie) -> prochain coup jusqu'a +35% ; s'arreter/reculer la vide.
+      - COUP SISMIQUE : M2 MAINTENU fige la montee d'Attack2 (tremblement) ; relacher
+        l'abat, chargee jusqu'a x2.2 -- et A PLEINE CHARGE le coup PERCE LA GARDE.
+      - ANCRAGE : en garde ou en charge sismique, AUCUN recul (poussee ignoree).
+      - COLERE LENTE : plus ELLE a perdu de vie, plus elle frappe fort (jusqu'a +35%
+        sous 20% PV). Multiplicateur total plafonne a MULT_CAP."""
 
     ICON = "assets/characters/Hero Knight/Icon.png"   # icone 26px pour le menu
+
+    POIDS_MAX_F = 54               # ~1,8 s de marche vers l'ennemi = poids plein
+    POIDS_BONUS = 0.35             # +35% de degats a poids plein (consomme par le coup)
+    COLERE_BONUS = 0.35            # +35% au plancher de vie...
+    COLERE_HAUT = 0.60             # ... la colere demarre sous 60% PV
+    COLERE_BAS = 0.20              # ... et plafonne a 20% PV
+    MULT_CAP = 2.75                # garde-fou : cumul poids*colere*seisme plafonne
 
     CONFIG = {
         "sprite_sheet": "assets/characters/Hero Knight/Sprites/HeroKnight.png",
@@ -1510,7 +1549,118 @@ class Lysandra(Fighter):
                 "hitboxes_right": [(0, 0, 470, None), (-138, -170, 608, 170)],
                 "hitboxes_left":  [(-470, 0, 470, None), (-470, -170, 608, 170)]},
         },
+        "armure": (1, 2),          # INEBRANLABLE : super-armure sur TOUTES ses attaques
+        # COUP SISMIQUE (M2 maintenu) : gel a la frame 2 (juste avant l'impact frame 3),
+        # charge jusqu'a charge_ms (x mult_max), perce la garde des perce_seuil de charge,
+        # relache force apres auto_ms (anti-statue).
+        "seisme": {"gel_frame": 2, "charge_ms": 1400, "auto_ms": 1600,
+                   "mult_max": 2.2, "perce_seuil": 0.85},
     }
+
+    def title_dest(self):
+        """Nom un cran PLUS BAS (comme Konrad/Kenshi) : la jauge de POIDS vit sous la barre."""
+        if self.side == "Left":
+            return (30, 74)
+        return (self.config["title_x_right"], 74)
+
+    def ancrage_actif(self):
+        """ANCRAGE : en garde ou en charge sismique, rien ne la fait reculer."""
+        return bool(self.block or getattr(self, "_seisme_gel", False))
+
+    def _en_attack2(self):
+        """True pendant TOUTE l'attaque 2. PIEGE : mvmt remet attack_type a 0 des la
+        2e frame -> le repere fiable est l'ACTION (attack_type ne sert qu'a la 1re)."""
+        return self.attacking and (self.attack_type == 2
+                                   or self.action == self.actions["attack2"])
+
+    def mvmt(self, surface, target):
+        x0 = self.rect.centerx
+        super().mvmt(surface, target)
+        # MARCHE INARRETABLE : chaque frame passee a AVANCER vers l'ennemi charge le
+        # poids ; reculer/s'arreter le vide (3x plus vite). Il TIENT pendant ses
+        # attaques (sinon il s'eventerait avant que le coup parte).
+        vers = 1 if target.rect.centerx >= x0 else -1
+        avance = (self.rect.centerx - x0) * vers
+        if avance > 0 and not self.jump and not self.attacking:
+            self.poids = min(self.POIDS_MAX_F, getattr(self, "poids", 0) + 1)
+        elif avance <= 0 and not self.attacking and not self.jump:
+            self.poids = max(0, getattr(self, "poids", 0) - 3)
+
+    def update(self, surface, target):
+        cfgs = self.config["seisme"]
+        held = bool(getattr(self, "inputs", None)) and self.inputs.move2
+        # INEBRANLABLE : marque l'absorption (Moves Guide) avant que la base efface le hit.
+        self._armure_abs = bool(self.hit and self.attacking)
+        # --- CHARGE SISMIQUE : Attack2 TENUE -> montee figee, relachee = l'abattee part ---
+        if self._en_attack2():
+            if not getattr(self, "_seisme_arme", False):
+                self._seisme_arme = True          # nouvelle attaque 2 : etat remis a neuf
+                self._seisme_gel = False
+                self._seisme_lache = False
+                self._seisme_t0 = 0
+                self._seisme_mult = 1.0
+                self._seisme_perce = False
+            if (self.frame_index >= cfgs["gel_frame"] and held
+                    and not getattr(self, "_seisme_lache", False)):
+                if not self._seisme_gel:
+                    self._seisme_gel = True
+                    self._seisme_t0 = temps_actif_ms()
+                if temps_actif_ms() - self._seisme_t0 >= cfgs["auto_ms"]:
+                    held = False                  # relache FORCEE (anti-statue)
+                else:
+                    self.frame_index = cfgs["gel_frame"]
+                    self.update_time = temps_ms()  # fige l'avancee de l'animation
+            if getattr(self, "_seisme_gel", False) and not held:
+                ratio = min(1.0, (temps_actif_ms() - self._seisme_t0) / cfgs["charge_ms"])
+                self._seisme_mult = 1.0 + (cfgs["mult_max"] - 1.0) * ratio
+                self._seisme_perce = ratio >= cfgs["perce_seuil"]
+                self._seisme_gel = False
+                self._seisme_lache = True         # plus de re-gel sur CETTE attaque
+        else:
+            self._seisme_arme = False
+        super().update(surface, target)
+
+    def mult_degats(self, target):
+        m = getattr(self, "_seisme_mult", 1.0) if self._en_attack2() else 1.0
+        m *= 1.0 + self.POIDS_BONUS * (getattr(self, "poids", 0) / self.POIDS_MAX_F)
+        ratio = self.health / self.max_health
+        colere = self.COLERE_BONUS * max(0.0, min(1.0, (self.COLERE_HAUT - ratio)
+                                                  / (self.COLERE_HAUT - self.COLERE_BAS)))
+        self._colere_active = colere > 0.01
+        m *= 1.0 + colere
+        return min(self.MULT_CAP, m)
+
+    def perce_garde(self, target):
+        # SEISME a pleine charge : l'onde passe A TRAVERS la garde (la parade parfaite,
+        # elle, reste au-dessus : contrepartie frame-perfect toujours possible).
+        return self._en_attack2() and getattr(self, "_seisme_perce", False)
+
+    def coup_touche(self, target, bloque):
+        self._marche_conso = getattr(self, "poids", 0) / self.POIDS_MAX_F   # pour le guide
+        self._seisme_conso = getattr(self, "_seisme_mult", 1.0) if self._en_attack2() else 1.0
+        self.poids = 0                            # le poids est CONSOMME par le coup
+        self._seisme_mult = 1.0
+        self._seisme_perce = False
+
+    def draw(self, surface):
+        # Tremblement pendant la charge sismique (le sol gronde sous elle)
+        if getattr(self, "_seisme_gel", False):
+            dxj = ((temps_ms() // 33) % 3) - 1
+            self.rect.x += dxj
+            super().draw(surface)
+            self.rect.x -= dxj
+        else:
+            super().draw(surface)
+        # Jauge de POIDS : rail translucide + remplissage blanc, sous SA barre de vie.
+        total, hh = 184, 9
+        bx = 20 if self.side == "Left" else 1180 + 396 - total
+        jauge = pygame.Surface((total, hh), pygame.SRCALPHA)
+        pygame.draw.rect(jauge, (170, 170, 170, 70), (0, 0, total, hh), 0, 3)
+        w = int(total * getattr(self, "poids", 0) / self.POIDS_MAX_F)
+        if w > 0:
+            pygame.draw.rect(jauge, (246, 244, 238, 255), (0, 0, w, hh), 0, 3)
+        pygame.draw.rect(jauge, (30, 27, 22, 160), (0, 0, total, hh), 1, 3)
+        surface.blit(jauge, (bx, 52))
 
 #----------------------------------------------------------------------------------------------------------------------
 
@@ -4710,6 +4860,13 @@ def _d_dodge_cancel(f, degats):
     return cur > prev
 
 
+def _d_ancrage(f, degats):
+    prev = getattr(f, "_gd_ancr", 0)
+    cur = getattr(f, "_ancrage_nb", 0)
+    f._gd_ancr = cur
+    return cur > prev
+
+
 _M_ESQUIVE = {"nom": "Dodge", "seq": ["UP"],
               "note": "Invulnerable hop, always away from the enemy",
               "detect": lambda f, d: _front(f, "dodging", "_gd_dodge"),
@@ -4740,7 +4897,25 @@ MOVES_GUIDE = {
          "note": "+30% damage against a weakened foe - end the duel",
          "detect": lambda f, d: d > 0 and getattr(f, "_exec_active", False)},
     ],
-    "Lysandra": [dict(_M_ESQUIVE, note="Invulnerable hop - slow but steady")],
+    "Lysandra": [
+        {"nom": "Seismic Blow", "seq": ["HOLD M2", "RELEASE"],
+         "note": "Freeze the windup to charge (up to x2.2) - fully charged, it smashes THROUGH guard",
+         "detect": lambda f, d: d > 0 and getattr(f, "_seisme_conso", 1.0) > 1.05,
+         "prog": lambda f: 1 if getattr(f, "_seisme_gel", False) else 0},
+        {"nom": "Grinding March", "seq": ["WALK AT FOE", "HIT"],
+         "note": "Marching at the foe loads her blow (up to +35%) - stopping bleeds it away",
+         "detect": lambda f, d: d > 0 and getattr(f, "_marche_conso", 0) >= 0.5,
+         "prog": lambda f: 1 if getattr(f, "poids", 0) >= f.POIDS_MAX_F * 0.5 else 0},
+        {"nom": "Unbreakable", "seq": ["M1 / M2"],
+         "note": "Her swings can NOT be interrupted - she trades pain for pain",
+         "detect": lambda f, d: _front(f, "_armure_abs", "_gd_armure")},
+        {"nom": "Anchored", "seq": ["BLOCK"],
+         "note": "Blocking or charging, she cannot be pushed an inch",
+         "detect": _d_ancrage},
+        {"nom": "Slow Wrath", "seq": ["UNDER 60% HP"],
+         "note": "The more she bleeds, the harder she hits (up to +35%)",
+         "detect": lambda f, d: d > 0 and getattr(f, "_colere_active", False)},
+    ],
     "Konrad": [
         {"nom": "Weapon Switch", "seq": ["M2"],
          "note": "Cycle rapier > spear > heavy sword > mace",

@@ -66,6 +66,11 @@ _RESET = dict(attacking=False, attack_cd=0, hit=False, block=False, block_cd=0,
               _exec_active=False, cancel_cd=0, nb_cancels=0, _pl_depart=None,
               _pl_croise=False, _pl_dodge_prev=False, _flow_hp=None, _trail=None,
               _dodge_trav=False, _flow_t=0,
+              # kit Lysandra (seisme / marche / ancrage / colere / armure)
+              poids=0, _seisme_arme=False, _seisme_gel=False, _seisme_t0=0,
+              _seisme_mult=1.0, _seisme_perce=False, _seisme_lache=False,
+              _seisme_conso=1.0, _marche_conso=0.0, _colere_active=False,
+              _armure_abs=False, _ancrage_nb=0, _gd_armure=False, _gd_ancr=0,
               # dummy
               mourant=False, respawn_timer=0)
 _CACHE = {}
@@ -1042,6 +1047,89 @@ def t_kenshi_kit():
     l.rect.centerx = 700; l._dodge_up_prev = False; l.dodging = False; l.dodge_cd = 0
     classes.demarrer_esquive(l, True, e, d)
     assert l.dodge_dir == -1, "Lysandra proche doit toujours fuir a l'oppose"
+
+
+@test("Kit Lysandra : juggernaut (armure totale, seisme, marche, ancrage, colere)")
+def t_lysandra_kit():
+    l = perso(classes.Lysandra, 700)
+    d = dummy(900)
+    loin = dummy(1400)
+
+    # 1) INEBRANLABLE : super-armure sur TOUTES ses attaques (config armure = (1, 2))
+    l.attacking = True; l.attack_type = 1; l.hit = True
+    assert classes.armure_lourde(l), "attack1 doit etre sous super-armure"
+    l.update(SURF, d)
+    assert not l.hit, "un coup encaisse pendant l'attaque ne doit PAS l'interrompre"
+    l.attack_type = 2
+    assert classes.armure_lourde(l), "attack2 aussi (tous ses coups sont inarretables)"
+    l.attacking = False; l.hit = False; l.attack_type = 0
+
+    # 2) ANCRAGE : en garde, la poussee ne la deplace pas d'un pixel
+    l.block = True; x0 = l.rect.x
+    classes.poussee(l, l.rect.centerx - 100, 30)
+    assert l.rect.x == x0 and l._ancrage_nb >= 1, "en garde : ZERO recul (ancrage)"
+    l.block = False; x0 = l.rect.x
+    classes.poussee(l, l.rect.centerx - 100, 30)
+    assert l.rect.x != x0, "hors garde/charge : la poussee la deplace normalement"
+    l.rect.centerx = 700; l.rect.bottom = classes.SOL
+
+    # 3) MARCHE INARRETABLE : avancer vers l'ennemi charge le poids ; un coup le consomme
+    l.poids = 0
+    for _ in range(30):
+        l.inputs = classes.Inputs(right=True)     # vers le dummy (900, a droite)
+        l.mvmt(SURF, d)
+    assert l.poids >= 25, "30 frames de marche vers l'ennemi -> du poids (recu %s)" % l.poids
+    l.poids = classes.Lysandra.POIDS_MAX_F
+    l.attack_type = 1; d.health = d.max_health; l.health = l.max_health
+    m = l.mult_degats(d)
+    assert abs(m - 1.35) < 0.02, "poids plein = +35%% (recu %.2f)" % m
+    l.coup_touche(d, False)
+    assert l.poids == 0, "le coup consomme le poids"
+
+    # 4) SEISME : M2 TENUE -> montee figee ; relache -> mult ; PLEINE charge -> perce la garde
+    l.rect.centerx = 700
+    classes.reset_horloge(); classes.reset_horloge_active()
+    l.attacking = True; l.attack_type = 2; l._seisme_arme = False; l._seisme_lache = False
+    l.frame_index = 2; l.inputs = classes.Inputs(move2=True)
+    l.update(SURF, loin)
+    assert l._seisme_gel, "M2 tenue a la frame de gel -> charge sismique"
+    for _ in range(20):                            # ~0,66 s de charge
+        classes.avancer_horloge(); classes.avancer_horloge_active()
+        l.frame_index = 2; l.inputs = classes.Inputs(move2=True)
+        l.update(SURF, loin)
+        assert l.frame_index <= 2 or l._seisme_gel is False, "la montee doit rester FIGEE"
+    l.inputs = classes.Inputs(); l.frame_index = 2
+    l.update(SURF, loin)                           # RELACHE (charge partielle)
+    assert not l._seisme_gel and 1.2 < l._seisme_mult < 2.15, \
+        "charge partielle -> mult intermediaire (recu %.2f)" % l._seisme_mult
+    assert not l.perce_garde(loin), "charge partielle : ne perce PAS la garde"
+    # pleine charge (>= charge_ms) -> x2.2 et PERCE
+    l._seisme_arme = False; l._seisme_lache = False
+    l.frame_index = 2; l.inputs = classes.Inputs(move2=True); l.update(SURF, loin)
+    for _ in range(46):                            # > 1400 ms
+        classes.avancer_horloge(); classes.avancer_horloge_active()
+        l.frame_index = 2; l.inputs = classes.Inputs(move2=True)
+        l.update(SURF, loin)
+    l.inputs = classes.Inputs(); l.frame_index = 2
+    l.update(SURF, loin)
+    assert abs(l._seisme_mult - 2.2) < 0.06 and l.perce_garde(loin), \
+        "pleine charge : x2.2 + PERCE la garde (mult %.2f)" % l._seisme_mult
+    l.attacking = False; l._seisme_mult = 1.0; l._seisme_perce = False
+
+    # 5) COLERE LENTE : x1 a pleine vie, +35% au plancher (20% PV)
+    l.poids = 0; l.attack_type = 1
+    l.health = l.max_health
+    assert abs(l.mult_degats(d) - 1.0) < 1e-6, "pleine vie : pas de colere"
+    l.health = l.max_health * 0.2
+    assert abs(l.mult_degats(d) - 1.35) < 0.02, "20%% PV : +35%%"
+
+    # 6) GARDE-FOU : le cumul poids * colere * seisme plafonne a MULT_CAP
+    l.attacking = True; l.attack_type = 2          # en pleine attaque 2 (gate _en_attack2)
+    l._seisme_mult = 2.2; l._seisme_perce = True
+    l.poids = classes.Lysandra.POIDS_MAX_F
+    assert abs(l.mult_degats(d) - classes.Lysandra.MULT_CAP) < 1e-6, "cumul plafonne"
+    l.attacking = False; l.health = l.max_health; l.attack_type = 0
+    l._seisme_mult = 1.0; l._seisme_perce = False; l.poids = 0
 
 
 # ---------------------------------------------------------------- runner
