@@ -4576,6 +4576,18 @@ _f_combo_badge = pygame.font.SysFont("consolas,arial", 30, bold=True)
 _f_combo_note = pygame.font.SysFont("georgia,serif", 22, italic=True)   # note du Moves Guide
 
 
+def _badge_touches(txt):
+    """Traduit les jetons M1/M2/UP/<< / >> d'un badge du guide vers les VRAIES
+    touches du joueur (profil 'Left' = celui du training). Lu au RENDU ->
+    toujours a jour, meme apres un remap dans Options > Keybinds."""
+    rep = {"M1": "move1", "M2": "move2", "UP": "up", "<<": "left", ">>": "right"}
+    mots = []
+    for mot in txt.split():
+        action = rep.get(mot)
+        mots.append(nom_touche(KEYBINDS["Left"].get(action)) if action else mot)
+    return "  ".join(mots)
+
+
 def _combo_timing(joueur):
     """Fenetre d'enchainement REELLE du coup en cours, lue DIRECTEMENT dans la logique du
     perso (methode combo_timing de sa classe = SOURCE UNIQUE, les memes valeurs que le code
@@ -4627,7 +4639,7 @@ def _combo_reussi(joueur, combo, degats):
 def dessiner_guide_combo(surface, joueur, combo, tick):
     """Aide visuelle du combo en cours (bas de l'ecran) : suite de boutons M1/M2 (fait=vert,
     a presser=or pulsant, a venir=gris) + barre de TIMING (curseur a caler dans la zone verte)."""
-    seq = combo["seq"]
+    seq = [_badge_touches(str(b)) for b in combo["seq"]]   # badges -> touches REELLES du joueur
     est_move = "detect" in combo   # entree du Moves Guide (validation par detect, pas par profondeur)
     cs = 0 if est_move else max(0, min(_profondeur_combo(joueur), len(seq)))
     BH, BGAP = 66, 22
