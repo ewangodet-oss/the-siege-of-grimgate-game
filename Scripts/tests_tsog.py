@@ -842,6 +842,80 @@ def t_ia_foudre():
     assert ok, "la foudre doit sortir au 3e coup du combo quand l'ennemi est charge a fond"
 
 
+
+@test("Moves Guide : donnees completes + detecteurs (spin/slam/tp/arme/lance/esquive)")
+def t_moves_guide():
+    G = classes.MOVES_GUIDE
+    NOMS = ("Kenshi", "Lysandra", "Konrad", "Arinya", "Stormr", "Oswald", "Barrion")
+    for nom in NOMS:
+        assert nom in G and G[nom], "pas d'entree Moves Guide pour %s" % nom
+        for mv in G[nom]:
+            assert mv.get("nom") and mv.get("seq") and mv.get("note"),                 "entree incomplete chez %s" % nom
+            assert callable(mv.get("detect")), "detect manquant : %s / %s" % (nom, mv.get("nom"))
+
+    def m(nom_p, nom_m):
+        return next(x for x in G[nom_p] if x["nom"] == nom_m)
+
+    # A BLANC : un perso neutre qui ne fait rien ne valide AUCUN move (2 appels :
+    # le 1er initialise les detecteurs a front montant, le 2e doit dire False).
+    CLASSES = {"Kenshi": classes.Kenshi, "Lysandra": classes.Lysandra,
+               "Konrad": classes.KonradForgeval, "Arinya": classes.Arinya,
+               "Stormr": classes.Stormr, "Oswald": classes.Oswald, "Barrion": classes.Barrion}
+    for nom_p, cls in CLASSES.items():
+        p = perso(cls)
+        for k in ("_gd_dodge", "_gd_tp", "_gd_arme", "_gd_lance"):
+            if hasattr(p, k):
+                delattr(p, k)
+        for mv in G[nom_p]:
+            mv["detect"](p, 0)
+            assert not mv["detect"](p, 0), "%s / %s se valide sans rien faire" % (nom_p, mv["nom"])
+
+    # CAS POSITIFS (flags du move + degats quand le move frappe)
+    b = perso(classes.Barrion)
+    b.spinning = True
+    assert m("Barrion", "Spin")["detect"](b, 12), "spin non detecte"
+    b.spinning = False; b.jumping_attack = True; b.hit_down = False
+    assert m("Barrion", "Hammer Leap")["detect"](b, 9), "saut-marteau non detecte"
+    b.hit_down = True
+    assert m("Barrion", "Sky Slam")["detect"](b, 20), "slam non detecte"
+    assert not m("Barrion", "Hammer Leap")["detect"](b, 9), "saut-marteau valide PENDANT le slam"
+
+    o = perso(classes.Oswald)
+    if hasattr(o, "_gd_tp"):
+        delattr(o, "_gd_tp")
+    o.teleporting = True
+    assert m("Oswald", "Teleport")["detect"](o, 0), "teleport non detecte (front montant)"
+    assert not m("Oswald", "Teleport")["detect"](o, 0), "teleport re-valide sans nouveau front"
+
+    k = perso(classes.KonradForgeval)
+    if hasattr(k, "_gd_arme"):
+        delattr(k, "_gd_arme")
+    k.current_weapon = 1
+    m("Konrad", "Weapon Switch")["detect"](k, 0)          # init du front
+    k.current_weapon = 3
+    assert m("Konrad", "Weapon Switch")["detect"](k, 0), "changement d'arme non detecte"
+
+    a = perso(classes.Arinya)
+    if hasattr(a, "_gd_lance"):
+        delattr(a, "_gd_lance")
+    a.has_spear = False
+    m("Arinya", "Spear Pickup")["detect"](a, 0)           # init (sans lance)
+    a.has_spear = True
+    assert m("Arinya", "Spear Pickup")["detect"](a, 0), "ramassage de lance non detecte"
+    a.spear = {"x": 0}
+    assert m("Arinya", "Charged Spear Throw")["detect"](a, 8), "lance qui touche non detectee"
+
+    s = perso(classes.Stormr)
+    s.enemy_charge = 12.0
+    assert m("Stormr", "Static Charge")["detect"](s, 5), "charge statique non detectee"
+
+    kn = perso(classes.Kenshi)
+    if hasattr(kn, "_gd_dodge"):
+        delattr(kn, "_gd_dodge")
+    kn.dodging = True
+    assert m("Kenshi", "Dodge")["detect"](kn, 0), "esquive non detectee"
+
+
 # ---------------------------------------------------------------- runner
 def main():
     import time

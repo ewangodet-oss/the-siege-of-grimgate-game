@@ -4573,6 +4573,7 @@ COMBOS_TRAIN = {
 }
 _f_combo_title = pygame.font.SysFont("georgia,serif", 26, bold=True)
 _f_combo_badge = pygame.font.SysFont("consolas,arial", 30, bold=True)
+_f_combo_note = pygame.font.SysFont("georgia,serif", 22, italic=True)   # note du Moves Guide
 
 
 def _combo_timing(joueur):
@@ -4627,10 +4628,13 @@ def dessiner_guide_combo(surface, joueur, combo, tick):
     """Aide visuelle du combo en cours (bas de l'ecran) : suite de boutons M1/M2 (fait=vert,
     a presser=or pulsant, a venir=gris) + barre de TIMING (curseur a caler dans la zone verte)."""
     seq = combo["seq"]
-    cs = max(0, min(_profondeur_combo(joueur), len(seq)))
-    BW, BH, BGAP = 66, 66, 22
-    total_w = len(seq) * BW + (len(seq) - 1) * BGAP
-    PANEL_W = max(total_w + 96, 440); PANEL_H = 190
+    est_move = "detect" in combo   # entree du Moves Guide (validation par detect, pas par profondeur)
+    cs = 0 if est_move else max(0, min(_profondeur_combo(joueur), len(seq)))
+    BH, BGAP = 66, 22
+    largeurs = [max(66, _f_combo_badge.size(str(b))[0] + 26) for b in seq]   # badges a largeur variable
+    total_w = sum(largeurs) + (len(seq) - 1) * BGAP
+    PANEL_W = max(total_w + 96, 440)
+    PANEL_H = 176 if est_move else 216      # move : pas de barre de timing -> panneau plus court
     px = SCREEN_WIDTH // 2 - PANEL_W // 2; py = 92   # EN HAUT, sous les barres de vie + l'indication
     plaque_metal(surface, pygame.Rect(px, py, PANEL_W, PANEL_H))   # panneau plaque de fer
     tt = _f_combo_title.render(combo["nom"], True, (38, 30, 20))
@@ -4638,7 +4642,8 @@ def dessiner_guide_combo(surface, joueur, combo, tick):
     # Badges des boutons
     bx = SCREEN_WIDTH // 2 - total_w // 2; by = py + 50
     for i, b in enumerate(seq):
-        r = pygame.Rect(bx + i * (BW + BGAP), by, BW, BH)
+        r = pygame.Rect(bx, by, largeurs[i], BH)
+        bx += largeurs[i] + BGAP
         if i < cs:
             fill, edge = (24, 54, 92), (90, 150, 230)           # deja enchaine -> BLEU (le vert = "presser")
         elif i == cs:
@@ -4657,7 +4662,7 @@ def dessiner_guide_combo(surface, joueur, combo, tick):
     # Barre de timing : le curseur balaie de gauche a droite ; presser quand il atteint la
     # ZONE VERTE (la fenetre d'enchainement du coup en cours). Le curseur vire au vert vif dedans.
     # Pas de barre sur la DERNIERE attaque du combo (rien a enchainer apres).
-    tim = _combo_timing(joueur) if _attaque_ordinale(joueur) < len(seq) else None
+    tim = None if est_move else (_combo_timing(joueur) if _attaque_ordinale(joueur) < len(seq) else None)
     bary = by + BH + 18
     if tim:
         total, ws, we, now = tim
@@ -4679,6 +4684,11 @@ def dessiner_guide_combo(surface, joueur, combo, tick):
         pygame.draw.rect(surface, ccol, (cxp - 2, bary, 4, BARH))
         lab = _f_dev.render("PRESS on green", True, (150, 60, 50) if not dans else (30, 120, 55))
         surface.blit(lab, lab.get_rect(midtop=(SCREEN_WIDTH // 2, bary + BARH + 3)))
+    # Note pedagogique (une ligne, bas du panneau) : le "pourquoi/quand" du move ou du combo
+    note = combo.get("note")
+    if note:
+        nt = _f_combo_note.render(note, True, (56, 44, 30))
+        surface.blit(nt, nt.get_rect(center=(SCREEN_WIDTH // 2, py + PANEL_H - 24)))
     else:
         nt = _f_dev.render(combo.get("note", ""), True, (58, 48, 34))
         surface.blit(nt, nt.get_rect(center=(SCREEN_WIDTH // 2, bary + 6)))
@@ -4806,12 +4816,13 @@ def pause_entrainement(perso, hp_actuel, shield_actuel="off"):
     stop_sfx_combat()   # coupe les sons de combat qui trainent a l'ouverture de la pause
     flou = apply_blur(screen.copy())
     combos = COMBOS_TRAIN.get(perso, [])
+    moves = classes.MOVES_GUIDE.get(perso, [])       # coups signatures (source : classes.py)
     cx = SCREEN_WIDTH // 2
     voile = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT)); voile.set_alpha(120); voile.fill(NOIR)
     b_resume = Button(cx - 230, 224, "Resume", 460, 92)              # action primaire
     sec = [("Change Character", "change"), ("Custom Dummy", "dummy")]
-    if combos:
-        sec.append(("Combo Trainer", "combo"))
+    if combos or moves:
+        sec.append(("Moves Guide", "combo"))
     sec.append(("Options", "options"))
     GW, GH, GX, GY = 300, 66, 30, 18                                 # grille 2 colonnes
     x0 = cx - GW - GX // 2; y0 = 362
@@ -4823,7 +4834,8 @@ def pause_entrainement(perso, hp_actuel, shield_actuel="off"):
         grid.append((Button(bx, by, lab, GW, GH), act))
     ny = (len(sec) + 1) // 2
     b_menu = Button(cx - 160, y0 + ny * (GH + GY) + 26, "Main Menu", 320, 62)
-    drop_items = [("Free training", None)] + [(c["nom"], c) for c in combos]
+    drop_items = ([("Free training", None)] + [(m["nom"], m) for m in moves]
+                  + [(c["nom"], c) for c in combos])
     DROP_H = 50
     deroule = False
     while True:
@@ -4850,7 +4862,7 @@ def pause_entrainement(perso, hp_actuel, shield_actuel="off"):
         if deroule and combo_rect:
             dim = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA); dim.fill((0, 0, 0, 150))
             screen.blit(dim, (0, 0))
-            dessiner_bouton_metal(screen, combo_rect, "Combo Trainer", True)   # au-dessus du voile
+            dessiner_bouton_metal(screen, combo_rect, "Moves Guide", True)   # au-dessus du voile
             dy = combo_rect.bottom + 8
             for label, cdata in drop_items:
                 rr = pygame.Rect(combo_rect.x, dy, combo_rect.width, DROP_H)
@@ -5155,7 +5167,14 @@ def jouer_entrainement(perso):
         detecter_sons_combat(joueur, dummy)
         detecter_sons_combat(dummy, joueur)               # bouclier du dummy : sons + particules
         # Reussite du combo = son DERNIER coup TOUCHE (pas juste l'initiation).
-        reussi = (combo_actif is not None) and not dummy.mourant and _combo_reussi(joueur, combo_actif, degats)
+        # Reussite : combo classique (profondeur + degats) OU move signature du Moves
+        # Guide (fonction detect de classes.MOVES_GUIDE, front montant / degats selon le move).
+        if combo_actif is None or dummy.mourant:
+            reussi = False
+        elif "detect" in combo_actif:
+            reussi = bool(combo_actif["detect"](joueur, degats))
+        else:
+            reussi = _combo_reussi(joueur, combo_actif, degats)
         if degats > 0 and not dummy.mourant and not reussi:   # son de coup encaisse
             jouer_sfx(SONS_DUMMY["hit"], GAIN_COMBAT, cat="perso")
         if combo_actif is None:

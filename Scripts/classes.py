@@ -4459,3 +4459,85 @@ class TrainingDummy(Fighter2):
             si = pygame.transform.flip(sprite_nuit(shield), self.flip, False)
             surface.blit(si, (self.rect.centerx - si.get_width() // 2,
                               self.rect.centery - si.get_height() // 2))
+
+
+# ======================================================================
+#  MOVES GUIDE (mode Entrainement) -- les COUPS SIGNATURES de chaque perso.
+#  Source unique pour le panneau "Moves Guide" du training (TSOG Game).
+#  Chaque entree : nom affiche, sequence de badges (libelles libres),
+#  note d'une ligne, et detect(joueur, degats) -> True a l'instant ou le
+#  move vient d'etre REUSSI sur le mannequin. Les moves "a degats" testent
+#  degats>0 + le flag du move ; les moves "action" (teleport, esquive,
+#  changement d'arme...) se valident sur le FRONT MONTANT de leur etat
+#  (via _front, qui stocke l'etat precedent SUR le fighter -> reset auto
+#  a chaque changement de perso puisque l'instance est recreee).
+# ======================================================================
+
+def _front(f, attr, cle):
+    """True uniquement a l'INSTANT ou f.<attr> passe a True (front montant)."""
+    prev = getattr(f, cle, False)
+    cur = bool(getattr(f, attr, False))
+    setattr(f, cle, cur)
+    return cur and not prev
+
+
+def _d_changement_arme(f, degats):
+    prev = getattr(f, "_gd_arme", None)
+    cur = getattr(f, "current_weapon", None)
+    f._gd_arme = cur
+    return prev is not None and cur is not None and cur != prev
+
+
+def _d_ramassage_lance(f, degats):
+    prev = getattr(f, "_gd_lance", None)
+    cur = getattr(f, "has_spear", None)
+    f._gd_lance = cur
+    return prev is False and cur is True
+
+
+_M_ESQUIVE = {"nom": "Dodge", "seq": ["UP"],
+              "note": "Invulnerable hop, always away from the enemy",
+              "detect": lambda f, d: _front(f, "dodging", "_gd_dodge")}
+
+MOVES_GUIDE = {
+    "Kenshi":   [dict(_M_ESQUIVE, note="Invulnerable hop - the fastest dodge of the roster")],
+    "Lysandra": [dict(_M_ESQUIVE, note="Invulnerable hop - slow but steady")],
+    "Konrad": [
+        {"nom": "Weapon Switch", "seq": ["M2"],
+         "note": "Cycle rapier > spear > heavy sword > mace",
+         "detect": _d_changement_arme},
+        dict(_M_ESQUIVE),
+    ],
+    "Arinya": [
+        {"nom": "Charged Spear Throw", "seq": ["HOLD M2", "RELEASE"],
+         "note": "Longer charge = faster, deadlier spear",
+         "detect": lambda f, d: d > 0 and getattr(f, "spear", None) is not None},
+        {"nom": "Spear Pickup", "seq": ["WALK ON IT"],
+         "note": "Bare-handed after a throw - reclaim your spear on the ground",
+         "detect": _d_ramassage_lance},
+        dict(_M_ESQUIVE),
+    ],
+    "Stormr": [
+        {"nom": "Static Charge", "seq": ["M1 / M2"],
+         "note": "Every hit charges the enemy - fill the gauge to unlock the lightning",
+         "detect": lambda f, d: d > 0 and getattr(f, "enemy_charge", 0) > 0},
+        dict(_M_ESQUIVE),
+    ],
+    "Oswald": [
+        {"nom": "Teleport", "seq": ["UP"],
+         "note": "Blink through your foe - this IS your escape, no dodge",
+         "detect": lambda f, d: _front(f, "teleporting", "_gd_tp")},
+    ],
+    "Barrion": [
+        {"nom": "Spin", "seq": ["<<  <<", "or  >>  >>"],
+         "note": "Double-tap a direction - beware, a FRESH shield reflects it",
+         "detect": lambda f, d: d > 0 and getattr(f, "spinning", False)},
+        {"nom": "Hammer Leap", "seq": ["UP"],
+         "note": "Leaping hammer strike - the old knight has no dodge",
+         "detect": lambda f, d: (d > 0 and getattr(f, "jumping_attack", False)
+                                 and not getattr(f, "hit_down", False))},
+        {"nom": "Sky Slam", "seq": ["UP", "AIR M2"],
+         "note": "Crash down mid-leap - the hammer shakes the ground",
+         "detect": lambda f, d: d > 0 and getattr(f, "hit_down", False)},
+    ],
+}
