@@ -535,35 +535,82 @@ def esquive_params(f):
             pr.get("iframes", ESQUIVE_IFRAMES), pr.get("cd", ESQUIVE_CD))
 
 
+LAME_FENETRE_MS = 660    # fenetre "lame affutee" apres une esquive de Kenshi (~20 frames actives)
+
+
 def demarrer_esquive(f, U, e, target=None):
     """ESQUIVE (Haut) = un SAUT INVULNERABLE, toujours DANS LE SENS INVERSE de l'adversaire (on
     s'ELOIGNE de lui), QUEL QUE SOIT le regard : ennemi devant -> saut en arriere ; ennemi dans
     le dos (on s'est retourne) -> saut en avant (= toujours loin de lui). Vitesse/hauteur/cd selon
-    l'AGILITE du perso (esquive_params). A appeler en tete de mvmt. Gere cooldown + init paresseuse."""
+    l'AGILITE du perso (esquive_params). A appeler en tete de mvmt. Gere cooldown + init paresseuse.
+    KIT KENSHI (cles optionnelles de config['esquive'], inertes pour les autres persos) :
+      - "traverse": px -> de PRES, l'esquive TRAVERSE l'ennemi (depose dans son dos) ; toute
+        esquive RETOMBEE PROPREMENT ouvre une fenetre 'lame affutee' (_lame_niv 1, ou 2 si
+        l'ennemi a ete traverse) exploitee par Kenshi.mult_degats (Premier sang / Passe-lame).
+      - "cancel_cd": frames -> DODGE-CANCEL : Haut pendant une attaque coupe l'attaque en
+        esquive (compteur nb_cancels pour le Moves Guide), puis cooldown dedie cancel_cd.
+    Le FLOW de Kenshi (stacks de coups) raccourcit aussi le cooldown d'esquive ici."""
     f.dodging = getattr(f, "dodging", False)      # garantit l'attribut (init paresseuse)
     if getattr(f, "hit", False):
         f.dodging = False                         # touche pendant l'esquive (atterrissage vulnerable) -> annulee
+        f._pl_depart = None                       # esquive cassee -> pas de fenetre de lame
     if getattr(f, "dodge_cd", 0) > 0:
         f.dodge_cd -= 1
+    if getattr(f, "cancel_cd", 0) > 0:
+        f.cancel_cd -= 1
     if getattr(f, "dodge_iframes", 0) > 0:
         f.dodge_iframes -= 1
+    pr_cfg = (getattr(f, "config", None) or {}).get("esquive") or {}
+    # Suivi de la TRAVERSEE pendant le vol : le cote par rapport a la cible a-t-il change ?
+    if f.dodging and target is not None and getattr(f, "_pl_depart", None) is not None:
+        cote = 1 if f.rect.centerx >= target.rect.centerx else -1
+        if cote != f._pl_depart:
+            f._pl_croise = True
+    # Fin d'esquive RETOMBEE PROPREMENT (pas cassee par un coup) -> fenetre de lame (Kenshi).
+    if getattr(f, "_pl_dodge_prev", False) and not f.dodging \
+            and getattr(f, "_pl_depart", None) is not None:
+        if pr_cfg.get("traverse"):
+            f._lame_niv = 2 if getattr(f, "_pl_croise", False) else 1
+            f._lame_fin = temps_actif_ms() + LAME_FENETRE_MS
+        f._pl_depart = None
+    f._pl_dodge_prev = f.dodging
     up_press = U and not getattr(f, "_dodge_up_prev", False)
     f._dodge_up_prev = U
     if not up_press or getattr(f, "dodging", False) or getattr(f, "dodge_cd", 0) != 0:
         return
-    if (getattr(f, "attacking", False) or getattr(f, "hit", False) or getattr(f, "dashing", False)
+    en_attaque = getattr(f, "attacking", False)
+    if (en_attaque and pr_cfg.get("cancel_cd") and getattr(f, "cancel_cd", 0) == 0
+            and not getattr(f, "hit", False)):
+        # DODGE-CANCEL (Kenshi) : l'attaque en cours est COUPEE par l'esquive.
+        f.attacking = False
+        f.attack_type = 0
+        f.damage_dealt = False
+        f.attack_cd = max(getattr(f, "attack_cd", 0), 10)   # pas de re-attaque instantanee
+        f.cancel_cd = pr_cfg["cancel_cd"]
+        f.nb_cancels = getattr(f, "nb_cancels", 0) + 1
+        en_attaque = False
+    if (en_attaque or getattr(f, "hit", False) or getattr(f, "dashing", False)
             or getattr(f, "charging", False) or getattr(f, "throwing", False)):
         return
-    # SENS = a l'OPPOSE de l'adversaire (on s'eloigne), base sur SA position, PAS sur le regard.
+    # SENS = a l'OPPOSE de l'adversaire ; EXCEPTION "traverse" (Kenshi) : de PRES, l'esquive
+    # passe AU TRAVERS de l'ennemi et le depose dans son dos (de loin : fuite normale).
     if target is not None:
-        f.dodge_dir = 1 if f.rect.centerx >= target.rect.centerx else -1
+        loin = 1 if f.rect.centerx >= target.rect.centerx else -1
+        trav = pr_cfg.get("traverse")
+        if trav and abs(f.rect.centerx - target.rect.centerx) < trav * e:
+            f.dodge_dir = -loin                   # vers/au travers de l'ennemi
+        else:
+            f.dodge_dir = loin
+        f._pl_depart = loin                       # cote de depart (pour detecter le croisement)
+        f._pl_croise = False
     else:
         f.dodge_dir = 1 if f.flip else -1         # fallback (pas de cible) : a l'oppose du regard
+        f._pl_depart = None
     dur, speed, hop, iframes, cd = esquive_params(f)   # profil d'AGILITE du perso (fige au declenchement)
     f.dodging = True
     f.dodge_timer = dur
     f.dodge_iframes = iframes
-    f.dodge_cd = cd
+    f.dodge_cd = max(16, cd - 6 * getattr(f, "flow", 0))   # FLOW : l'esquive recharge plus vite
     f._dodge_dur = dur; f._dodge_speed = speed; f._dodge_hop = hop
 
 
@@ -591,6 +638,7 @@ _DEBUG_CDS = (("atk",  "attack_cd", (235, 120, 70),  40),
               ("tp",   "tp_cd",     (255, 215, 120), 26),
               ("dash", "dash_cd",   (90, 170, 220),  45),
               ("dodge", "dodge_cd", (150, 220, 150), 45),
+              ("cncl", "cancel_cd", (200, 160, 255), 90),
               ("wpn",  "switch_cd", (185, 185, 185), 36))
 _FONT_CD = None
 
@@ -1219,6 +1267,7 @@ class Fighter:
             animation_cd = _cd[self.action]
         else:
             animation_cd = self.config.get("anim_cd", 99)
+        animation_cd = self.cadence_anim(animation_cd)   # kits (Flow de Kenshi)
         self.image = self.animation_list[self.action][self.frame_index]
         if temps_ms() - self.update_time > animation_cd:
             self.frame_index += 1
@@ -1272,6 +1321,21 @@ class Fighter:
             self.attacking = True
             self.damage_dealt = False
 
+    # --- Hooks de KIT (surcharges par les persos, ex. Kenshi) ---------------
+    def mult_degats(self, target):
+        """Multiplicateur applique aux degats de CE perso au moment ou un coup
+        connecte (lame affutee, execution...). 1.0 par defaut."""
+        return 1.0
+
+    def coup_touche(self, target, bloque):
+        """Appele quand un coup de CE perso vient de connecter (bloque ou non).
+        Sert aux kits (stacks de Flow, consommation de fenetre...)."""
+
+    def cadence_anim(self, cd):
+        """Cadence d'animation effective (ms/frame) - les kits peuvent accelerer
+        certaines actions (Flow de Kenshi sur les attaques)."""
+        return cd
+
     def check_collision(self, surface, target):
         """Vérifie si l'attaque touche l'adversaire et inflige les dégâts.
 
@@ -1296,7 +1360,7 @@ class Fighter:
                     debug_box(r, "damage box")
                 touche = any(r.colliderect(target.rect) for r in rects)
                 if touche and self.damage_dealt == False:
-                    damage = atk["damage"]
+                    damage = atk["damage"] * self.mult_degats(target)   # kits (lame, execution...)
                     block_dmg = atk["block_dmg"]
                     # Le bouclier ne protege que du cote ou le perso regarde.
                     # flip == True -> regarde a gauche, flip == False -> a droite.
@@ -1320,11 +1384,13 @@ class Fighter:
                         target.block_health += block_dmg*0.9
                         self.damage_dealt = True
                         self.blocked_hit = True
+                        self.coup_touche(target, True)
                     else:
                         target.health -= damage
                         target.hit = True
                         self.damage_dealt = True
                         poussee(target, self.rect.centerx, damage)   # recul d'impact
+                        self.coup_touche(target, False)
 
     def title_dest(self):
         """Position (coin haut-gauche) du nom a sa place normale."""
@@ -1431,9 +1497,24 @@ class Lysandra(Fighter):
 #----------------------------------------------------------------------------------------------------------------------
 
 class Kenshi(Fighter):
-    """Heros martial (Martial Hero) : plus rapide et leger, moins de vie."""
+    """Heros martial (Martial Hero) - GLASS CANNON insaisissable. Tres peu de vie,
+    mais un kit de duelliste-executeur (aucune nouvelle animation, tout est code) :
+      - PASSE-LAME : de pres, son esquive TRAVERSE l'ennemi (config esquive 'traverse') ;
+        toute esquive retombee ouvre une fenetre 'lame affutee' -> prochain coup +25%
+        (Premier sang), +50% si l'ennemi a ete traverse (frappe dans le dos).
+      - DODGE-CANCEL : Haut pendant une attaque coupe l'attaque en esquive (cd dedie).
+      - FLOW : chaque coup PROPRE qui touche = 1 stack (max 3) -> attaques plus rapides
+        + esquive qui recharge plus vite ; PERDRE de la vie (meme du chip) remet a zero.
+      - EXECUTION : +30% de degats contre un ennemi sous 25% de sa vie max.
+    Mecanique d'esquive/cancel implementee dans demarrer_esquive (source unique)."""
 
     ICON = "assets/characters/Martial Hero/Icon.png"   # icone 26px pour le menu
+
+    LAME_M = {1: 1.25, 2: 1.5}     # Premier sang / Passe-lame (frappe dans le dos)
+    EXEC_SEUIL = 0.25              # Execution : cible sous 25% de sa vie max...
+    EXEC_M = 1.3                   # ... -> degats x1.3
+    FLOW_MAX = 3
+    FLOW_ANIM = 0.07               # -7% de ms/frame d'attaque par stack de Flow
 
     CONFIG = {
         "sprite_sheet": "assets/characters/Martial Hero/Sprites/MartialHero.png",
@@ -1448,11 +1529,14 @@ class Kenshi(Fighter):
         # offset identique des deux cotes (le perso ne le change pas en courant)
         "offset_face_right": [520, 420],
         "offset_face_left": [520, 420],
-        "health": 350,
+        "health": 280,             # GLASS CANNON : la plus petite vie du roster (assumee)
         "speed_base": 25,
         # Kenshi TRES AGILE : esquive VIVE (saut rapide/haut, cd court) ; invuln BREVE au debut (4f
         # sur dur 9) -> majorite du saut vulnerable. Son agilite est dans la VITESSE/cd, pas l'invuln.
-        "esquive": {"dur": 9, "speed": 34, "hop": 150, "iframes": 4, "cd": 36},
+        # "traverse" : de pres (<300px monde) l'esquive TRAVERSE l'ennemi (passe-lame) ;
+        # "cancel_cd" : dodge-cancel d'attaque, recharge dediee (frames).
+        "esquive": {"dur": 9, "speed": 34, "hop": 150, "iframes": 4, "cd": 36,
+                    "traverse": 300, "cancel_cd": 90},
         "gravit": 2,
         "jump": 32,
         "attack1_cd": 15,
@@ -1474,6 +1558,63 @@ class Kenshi(Fighter):
                 "hitboxes_left":  [(-550, 0, 550, None)]},
         },
     }
+
+    # --- KIT : lame affutee / execution / flow ------------------------------
+    def lame_niveau(self):
+        """Niveau de la fenetre 'lame affutee' EN COURS (0 = aucune, 1 = apres une
+        esquive = Premier sang, 2 = apres avoir TRAVERSE l'ennemi = Passe-lame).
+        Fenetre posee par demarrer_esquive, sur l'horloge ACTIVE (figee en hitstop)."""
+        if temps_actif_ms() < getattr(self, "_lame_fin", 0):
+            return getattr(self, "_lame_niv", 0)
+        return 0
+
+    def mult_degats(self, target):
+        m = self.LAME_M.get(self.lame_niveau(), 1.0)
+        self._exec_active = target.health <= self.EXEC_SEUIL * target.max_health
+        if self._exec_active:
+            m *= self.EXEC_M                      # EXECUTION : achever un ennemi affaibli
+        return m
+
+    def coup_touche(self, target, bloque):
+        self._lame_derniere = self.lame_niveau()  # memorise le coup buff (Moves Guide)
+        self._lame_fin = 0                        # la fenetre est CONSOMMEE par ce coup
+        if not bloque:
+            self.flow = min(self.FLOW_MAX, getattr(self, "flow", 0) + 1)
+
+    def cadence_anim(self, cd):
+        if self.attacking:                        # FLOW : attaques plus rapides par stack
+            return int(cd * (1.0 - self.FLOW_ANIM * getattr(self, "flow", 0)))
+        return cd
+
+    def update(self, surface, target):
+        # FLOW : perdre de la vie (coup, chip...) remet les stacks a zero.
+        hp_avant = getattr(self, "_flow_hp", None)
+        if hp_avant is not None and self.health < hp_avant:
+            self.flow = 0
+        super().update(surface, target)
+        self._flow_hp = self.health
+
+    def draw(self, surface):
+        # Trainee d'afterimages : pendant l'esquive, ou en mouvement avec du Flow.
+        # Les fantomes sont les images DEJA flipees des frames precedentes (aucun
+        # cout de scale ; 1 flip supplementaire par frame active seulement).
+        trail = getattr(self, "_trail", None)
+        if trail is None:
+            trail = self._trail = []
+        flow = getattr(self, "flow", 0)
+        actif = getattr(self, "dodging", False) or (flow > 0 and (self.running or self.attacking))
+        if actif:
+            e = getattr(self, "echelle", 1.0)
+            img = pygame.transform.flip(sprite_nuit(self.image), self.flip, False)
+            trail.append([img, (self.rect.x - self.offset[0] * e,
+                                self.rect.y - self.offset[1] * e), 3])
+        for g in trail:                            # fantomes qui s'estompent (3 frames de vie)
+            g[2] -= 1
+            g[0].set_alpha(30 * g[2] + 14 * flow)
+        trail[:] = [g for g in trail if g[2] > 0][-4:]
+        for g in trail:
+            surface.blit(g[0], g[1])
+        super().draw(surface)
 
 #----------------------------------------------------------------------------------------------------------------------
 
@@ -4495,6 +4636,13 @@ def _d_ramassage_lance(f, degats):
     return prev is False and cur is True
 
 
+def _d_dodge_cancel(f, degats):
+    prev = getattr(f, "_gd_cancel", 0)
+    cur = getattr(f, "nb_cancels", 0)
+    f._gd_cancel = cur
+    return cur > prev
+
+
 _M_ESQUIVE = {"nom": "Dodge", "seq": ["UP"],
               "note": "Invulnerable hop, always away from the enemy",
               "detect": lambda f, d: _front(f, "dodging", "_gd_dodge"),
@@ -4504,7 +4652,27 @@ _M_ESQUIVE = {"nom": "Dodge", "seq": ["UP"],
 # chaque frame par le panneau -> les badges passent en bleu au fil du move
 # (comme la profondeur des combos). Sans prog : validation par le flash Success.
 MOVES_GUIDE = {
-    "Kenshi":   [dict(_M_ESQUIVE, note="Invulnerable hop - the fastest dodge of the roster")],
+    "Kenshi": [
+        {"nom": "Blade Through", "seq": ["UP  (close)", "M1 / M2"],
+         "note": "Up close your dodge cuts THROUGH the foe - strike his back for +50%",
+         "detect": lambda f, d: d > 0 and getattr(f, "_lame_derniere", 0) == 2,
+         "prog": lambda f: 1 if f.lame_niveau() == 2 else 0},
+        {"nom": "First Blood", "seq": ["UP", "M1 / M2"],
+         "note": "Any clean dodge sharpens your next strike (+25%) for a moment",
+         "detect": lambda f, d: d > 0 and getattr(f, "_lame_derniere", 0) >= 1,
+         "prog": lambda f: 1 if f.lame_niveau() >= 1 else 0},
+        {"nom": "Dodge Cancel", "seq": ["M1 / M2", "UP"],
+         "note": "Cut your own attack short with a dodge - escape a bad call",
+         "detect": _d_dodge_cancel,
+         "prog": lambda f: 1 if getattr(f, "attacking", False) else 0},
+        {"nom": "Flow", "seq": ["HIT", "HIT", "HIT"],
+         "note": "Each landed hit quickens Kenshi (max 3 stacks) - losing any health resets it",
+         "detect": lambda f, d: getattr(f, "flow", 0) >= 3,
+         "prog": lambda f: min(3, getattr(f, "flow", 0))},
+        {"nom": "Execution", "seq": ["FOE UNDER 25% HP"],
+         "note": "+30% damage against a weakened foe - end the duel",
+         "detect": lambda f, d: d > 0 and getattr(f, "_exec_active", False)},
+    ],
     "Lysandra": [dict(_M_ESQUIVE, note="Invulnerable hop - slow but steady")],
     "Konrad": [
         {"nom": "Weapon Switch", "seq": ["M2"],
