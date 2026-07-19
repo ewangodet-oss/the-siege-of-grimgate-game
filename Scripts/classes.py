@@ -926,7 +926,7 @@ class Button:
     """Bouton de menu 'plaque de fer abimee' (palette chaude de l'epee du logo).
     Au survol : la plaque s'eclaircit, bordure + texte virent a la braise."""
 
-    _polices = {}   # cache des polices Gothik Steel par taille
+    _polices = {}   # cache des polices Old London par taille
     son_hover = None   # callbacks SFX (branches par TSOG Game.py) : hover / clic
     son_click = None
 
@@ -934,7 +934,7 @@ class Button:
     def _police(taille):
         taille = max(10, int(taille))
         if taille not in Button._polices:
-            Button._polices[taille] = pygame.font.Font("assets/fonts/Gothik Steel.ttf", taille)
+            Button._polices[taille] = pygame.font.Font("assets/fonts/OldLondon.ttf", taille)
         return Button._polices[taille]
 
     def __init__(self, x, y, text, width=400, height=80):
@@ -1590,7 +1590,7 @@ class KonradForgeval:
         title = pygame.image.load("assets/characters/Ecuyer/title.png").convert_alpha()
         self.title = pygame.transform.scale(title, (220.45, 45))
         self.title_x_right = 1339.55
-        self.weapon_font = pygame.font.Font("assets/fonts/Chomsky.otf", 40)
+        self.weapon_font = pygame.font.Font("assets/fonts/PirataOne.ttf", 40)
 
     def load_image(self, sprite_sheet):
         """Découpe la sprite sheet en tenant compte de la colonne de depart
