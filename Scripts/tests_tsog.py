@@ -65,7 +65,7 @@ _RESET = dict(attacking=False, attack_cd=0, hit=False, block=False, block_cd=0,
               flow=0, _lame_fin=0, _lame_niv=0, _lame_derniere=0, _lame_atk=0,
               _exec_active=False, cancel_cd=0, nb_cancels=0, _pl_depart=None,
               _pl_croise=False, _pl_dodge_prev=False, _flow_hp=None, _trail=None,
-              _dodge_trav=False,
+              _dodge_trav=False, _flow_t=0,
               # dummy
               mourant=False, respawn_timer=0)
 _CACHE = {}
@@ -752,8 +752,8 @@ def t_esquive():
         "l'agilite doit se sentir (Kenshi vif < Stormr normal < Lysandra lourde)"
     # EQUILIBRAGE vs BOUCLIER : invuln COURTE au DEBUT seulement -> la MAJEURE PARTIE de l'esquive
     # est vulnerable (un adversaire qui time bien PEUT toucher l'esquiveur) + un coup l'ANNULE.
-    def _fenetres(cls):
-        p = perso(cls, 700); p.flip = False; d = dummy(900)
+    def _fenetres(cls, ex=900):
+        p = perso(cls, 700); p.flip = False; d = dummy(ex)
         classes.reset_horloge(); classes.reset_horloge_active()
         inv = vul = 0
         for f in range(30):
@@ -766,8 +766,11 @@ def t_esquive():
                     vul += 1
             p.update(SURF, d); d.update(SURF, p)
         return inv, vul
-    for cls in (classes.Kenshi, classes.Arinya, classes.KonradForgeval, classes.Stormr, classes.Lysandra):
-        inv, vul = _fenetres(cls)
+    # NB : Kenshi est mesure avec l'ennemi LOIN (1400) -> esquive de FUITE classique
+    # (sa traversee courte de pres est testee dans t_kenshi_kit).
+    for cls, ex in ((classes.Kenshi, 1400), (classes.Arinya, 900), (classes.KonradForgeval, 900),
+                    (classes.Stormr, 900), (classes.Lysandra, 900)):
+        inv, vul = _fenetres(cls, ex)
         assert inv >= 2, "%s : l'esquive doit evader si BIEN timee (invuln au debut)" % cls.__name__
         assert vul >= 3 and inv <= 5, \
             "%s : invuln COURTE + gros creneau vulnerable (invuln=%d vuln=%d)" % (cls.__name__, inv, vul)
@@ -996,6 +999,23 @@ def t_kenshi_kit():
     k._flow_hp = k.health; k.health -= 5
     k.update(SURF, d)
     assert k.flow == 0, "perdre de la vie doit remettre le flow a zero"
+    k.health = k.max_health; k._flow_hp = k.health
+
+    # 3ter) FLOW qui s'EVENTE : 4,5 s sans attaquer -> -1 stack, puis -1 par seconde.
+    k.flow = 3; k._flow_t = classes.temps_actif_ms() - 4600
+    k.update(SURF, d)
+    assert k.flow == 2, "4,5 s sans attaque -> le flow doit perdre 1 stack"
+    k.update(SURF, d)
+    assert k.flow == 2, "le stack suivant ne part qu'UNE SECONDE plus tard"
+    k._flow_t -= 1100
+    k.update(SURF, d)
+    assert k.flow == 1, "une seconde plus tard -> -1 stack de plus"
+    k.attacking = False; k.attack_cd = 0
+    k.attack(SURF, d)                                   # attaquer RELANCE le chrono
+    k.attacking = False
+    k.update(SURF, d)
+    assert k.flow == 1, "attaquer doit entretenir le flow (pas de perte)"
+    k.flow = 0
 
     # 4) EXECUTION : cible sous 25% -> x1.3 (et x1.3*1.5 si le coup porte la lame niv 2).
     d.health = d.max_health * 0.2

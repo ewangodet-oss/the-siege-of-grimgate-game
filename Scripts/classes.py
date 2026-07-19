@@ -624,6 +624,9 @@ def demarrer_esquive(f, U, e, target=None):
     f._dodge_trav = trav_dash
     if trav_dash:
         f._dodge_hop = 0                          # traversee = DASH RASANT (pas de saut)
+        f._dodge_speed = pr_cfg.get("trav_speed", f._dodge_speed)   # ... et plus VIF
+        f._dodge_dur = pr_cfg.get("trav_dur", f._dodge_dur)
+        f.dodge_timer = f._dodge_dur
 
 
 def esquive_dx(f, e):
@@ -1530,6 +1533,8 @@ class Kenshi(Fighter):
     EXEC_M = 1.3                   # ... -> degats x1.3
     FLOW_MAX = 3
     FLOW_ANIM = 0.07               # -7% de ms/frame d'attaque par stack de Flow
+    FLOW_GRACE_MS = 4500           # sans attaquer pendant 4,5 s...
+    FLOW_DECAY_MS = 1000           # ... le Flow s'evente : -1 stack par seconde
 
     CONFIG = {
         "sprite_sheet": "assets/characters/Martial Hero/Sprites/MartialHero.png",
@@ -1550,8 +1555,9 @@ class Kenshi(Fighter):
         # sur dur 9) -> majorite du saut vulnerable. Son agilite est dans la VITESSE/cd, pas l'invuln.
         # "traverse" : de pres (<300px monde) l'esquive TRAVERSE l'ennemi (passe-lame) ;
         # "cancel_cd" : dodge-cancel d'attaque, recharge dediee (frames).
+        # "trav_speed"/"trav_dur" : la traversee est un dash plus VIF que l'esquive de fuite.
         "esquive": {"dur": 9, "speed": 34, "hop": 150, "iframes": 4, "cd": 36,
-                    "traverse": 300, "cancel_cd": 90},
+                    "traverse": 300, "cancel_cd": 90, "trav_speed": 48, "trav_dur": 7},
         "gravit": 2,
         "jump": 32,
         "attack1_cd": 15,
@@ -1575,6 +1581,12 @@ class Kenshi(Fighter):
     }
 
     # --- KIT : lame affutee / execution / flow ------------------------------
+    def title_dest(self):
+        """Nom un cran PLUS BAS (comme Konrad) : la jauge de Flow vit sous la barre de vie."""
+        if self.side == "Left":
+            return (30, 74)
+        return (self.config["title_x_right"], 74)
+
     def lame_niveau(self):
         """Niveau de la fenetre 'lame affutee' EN COURS (0 = aucune, 1 = apres une
         esquive = Premier sang, 2 = apres avoir TRAVERSE l'ennemi = Passe-lame).
@@ -1592,6 +1604,7 @@ class Kenshi(Fighter):
             # expirer avant que le coup connecte -> boost jamais ressenti.
             self._lame_atk = self.lame_niveau()
             self._lame_fin = 0                    # fenetre transferee a CETTE attaque
+            self._flow_t = temps_actif_ms()       # attaquer ENTRETIENT le Flow
 
     def mult_degats(self, target):
         m = self.LAME_M.get(getattr(self, "_lame_atk", 0), 1.0)
@@ -1605,6 +1618,7 @@ class Kenshi(Fighter):
         self._lame_atk = 0                        # le buff est CONSOMME par ce coup
         if not bloque:
             self.flow = min(self.FLOW_MAX, getattr(self, "flow", 0) + 1)
+            self._flow_t = temps_actif_ms()       # un coup PORTE entretient aussi le Flow
 
     def cadence_anim(self, cd):
         if self.attacking:                        # FLOW : attaques plus rapides par stack
@@ -1616,6 +1630,13 @@ class Kenshi(Fighter):
         hp_avant = getattr(self, "_flow_hp", None)
         if hp_avant is not None and self.health < hp_avant:
             self.flow = 0
+        # ... et il S'EVENTE : sans attaquer pendant FLOW_GRACE_MS, -1 stack par
+        # FLOW_DECAY_MS (attaquer ou toucher relance le chrono via _flow_t).
+        if getattr(self, "flow", 0) > 0:
+            t = temps_actif_ms()
+            if t - getattr(self, "_flow_t", t) >= self.FLOW_GRACE_MS:
+                self.flow -= 1
+                self._flow_t = t - self.FLOW_GRACE_MS + self.FLOW_DECAY_MS
         super().update(surface, target)
         self._flow_hp = self.health
 
@@ -4711,7 +4732,7 @@ MOVES_GUIDE = {
          "detect": _d_dodge_cancel,
          "prog": lambda f: 1 if getattr(f, "attacking", False) else 0},
         {"nom": "Flow", "seq": ["HIT", "HIT", "HIT"],
-         "note": "Each landed hit quickens Kenshi (max 3 stacks) - losing any health resets it",
+         "note": "Landed hits quicken Kenshi (max 3) - fades if idle, lost if he bleeds",
          "detect": lambda f, d: getattr(f, "flow", 0) >= 3,
          "prog": lambda f: min(3, getattr(f, "flow", 0))},
         {"nom": "Execution", "seq": ["FOE UNDER 25% HP"],
