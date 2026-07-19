@@ -4636,12 +4636,23 @@ def _combo_reussi(joueur, combo, degats):
     return _profondeur_combo(joueur) >= len(combo["seq"])
 
 
-def dessiner_guide_combo(surface, joueur, combo, tick):
+def dessiner_guide_combo(surface, joueur, combo, tick, succes=False):
     """Aide visuelle du combo en cours (bas de l'ecran) : suite de boutons M1/M2 (fait=vert,
     a presser=or pulsant, a venir=gris) + barre de TIMING (curseur a caler dans la zone verte)."""
     seq = [_badge_touches(str(b)) for b in combo["seq"]]   # badges -> touches REELLES du joueur
     est_move = "detect" in combo   # entree du Moves Guide (validation par detect, pas par profondeur)
-    cs = 0 if est_move else max(0, min(_profondeur_combo(joueur), len(seq)))
+    if est_move:
+        # Progression du MOVE : fonction "prog" de classes.MOVES_GUIDE (0..len(seq)),
+        # lue chaque frame -> les badges bleuissent au fil du move (comme les combos).
+        pr = combo.get("prog")
+        try:
+            cs = max(0, min(len(seq), int(pr(joueur)))) if pr else 0
+        except Exception:
+            cs = 0
+    else:
+        cs = max(0, min(_profondeur_combo(joueur), len(seq)))
+    if succes:
+        cs = len(seq)              # flash de reussite : tous les badges valides (et VERTS)
     BH, BGAP = 66, 22
     # Separateur entre badges : fleche = ENCHAINEMENT (defaut) ; texte "sep" (ex "or")
     # = ALTERNATIVE (spin/dash : gauche OU droite) -> tous les badges s'allument pareil.
@@ -4664,7 +4675,9 @@ def dessiner_guide_combo(surface, joueur, combo, tick):
     for i, b in enumerate(seq):
         r = pygame.Rect(bx, by, largeurs[i], BH)
         bx += largeurs[i] + BGAP
-        if i < cs:
+        if succes:
+            fill, edge = (28, 96, 52), (120, 235, 150)          # reussite -> tout VERT (avec le Success !)
+        elif i < cs:
             fill, edge = (24, 54, 92), (90, 150, 230)           # deja enchaine -> BLEU (le vert = "presser")
         elif i == cs or sep:                                    # a presser (ou ALTERNATIVE : tous pareils)
             p = 0.5 + 0.5 * math.sin(tick * 0.2)                # -> pulse or
@@ -5280,7 +5293,7 @@ def jouer_entrainement(perso):
         info = fhud.render(hint, True, (238, 228, 205))
         screen.blit(info, info.get_rect(midtop=(SCREEN_WIDTH // 2, 58)))   # SOUS les barres de vie
         if combo_actif:                                   # aide visuelle du guide (sous l'indication)
-            dessiner_guide_combo(screen, joueur, combo_actif, tf)
+            dessiner_guide_combo(screen, joueur, combo_actif, tf, succes=succes_timer > 0)
             if succes_timer > 0:                          # move/combo reussi -> flash sous le panneau
                 succes_timer -= 1
                 _p = 0.5 + 0.5 * math.sin(tf * 0.35)

@@ -915,6 +915,15 @@ def t_moves_guide():
     kn.dodging = True
     assert m("Kenshi", "Dodge")["detect"](kn, 0), "esquive non detectee"
 
+    # PROGRESSION "prog" (badges bleus au fil du move dans le panneau)
+    b.spinning = False; b.jumping_attack = True; b.hit_down = False
+    assert m("Barrion", "Sky Slam")["prog"](b) == 1, "prog slam : etape 1 (saut) attendue"
+    b.hit_down = True
+    assert m("Barrion", "Sky Slam")["prog"](b) == 2, "prog slam : etape 2 (ecrasement) attendue"
+    assert m("Kenshi", "Dodge")["prog"](kn) == 1, "prog esquive : etape 1 attendue"
+    a.charging = True; a.throwing = False; a.spear = None
+    assert m("Arinya", "Charged Spear Throw")["prog"](a) == 1, "prog lancer : charge attendue"
+
 
 # ---------------------------------------------------------------- runner
 def main():

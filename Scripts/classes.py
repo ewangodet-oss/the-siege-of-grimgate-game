@@ -4497,8 +4497,12 @@ def _d_ramassage_lance(f, degats):
 
 _M_ESQUIVE = {"nom": "Dodge", "seq": ["UP"],
               "note": "Invulnerable hop, always away from the enemy",
-              "detect": lambda f, d: _front(f, "dodging", "_gd_dodge")}
+              "detect": lambda f, d: _front(f, "dodging", "_gd_dodge"),
+              "prog": lambda f: 1 if getattr(f, "dodging", False) else 0}
 
+# "prog" (optionnel) : nb de badges ACCOMPLIS "en ce moment" (0..len(seq)), lu
+# chaque frame par le panneau -> les badges passent en bleu au fil du move
+# (comme la profondeur des combos). Sans prog : validation par le flash Success.
 MOVES_GUIDE = {
     "Kenshi":   [dict(_M_ESQUIVE, note="Invulnerable hop - the fastest dodge of the roster")],
     "Lysandra": [dict(_M_ESQUIVE, note="Invulnerable hop - slow but steady")],
@@ -4511,36 +4515,47 @@ MOVES_GUIDE = {
     "Arinya": [
         {"nom": "Charged Spear Throw", "seq": ["HOLD M2", "RELEASE"],
          "note": "Longer charge = faster, deadlier spear",
-         "detect": lambda f, d: d > 0 and getattr(f, "spear", None) is not None},
+         "detect": lambda f, d: d > 0 and getattr(f, "spear", None) is not None,
+         "prog": lambda f: (2 if (getattr(f, "throwing", False)
+                                  or getattr(f, "spear", None) is not None)
+                            else 1 if getattr(f, "charging", False) else 0)},
         {"nom": "Spear Pickup", "seq": ["WALK ON IT"],
          "note": "Bare-handed after a throw - reclaim your spear on the ground",
          "detect": _d_ramassage_lance},
         {"nom": "Dash", "seq": ["<<  <<", ">>  >>"], "sep": "or",
          "note": "Double-tap a direction - quick burst to close in or retreat",
-         "detect": lambda f, d: _front(f, "dashing", "_gd_dash")},
+         "detect": lambda f, d: _front(f, "dashing", "_gd_dash"),
+         "prog": lambda f: 2 if getattr(f, "dashing", False) else 0},
         dict(_M_ESQUIVE),
     ],
     "Stormr": [
         {"nom": "Static Charge", "seq": ["M1 / M2"],
          "note": "Every hit charges the enemy - fill the gauge to unlock the lightning",
-         "detect": lambda f, d: d > 0 and getattr(f, "enemy_charge", 0) > 0},
+         "detect": lambda f, d: d > 0 and getattr(f, "enemy_charge", 0) > 0,
+         "prog": lambda f: 1 if getattr(f, "enemy_charge", 0) > 0 else 0},
         dict(_M_ESQUIVE),
     ],
     "Oswald": [
         {"nom": "Teleport", "seq": ["UP"],
          "note": "Blink through your foe - this IS your escape, no dodge",
-         "detect": lambda f, d: _front(f, "teleporting", "_gd_tp")},
+         "detect": lambda f, d: _front(f, "teleporting", "_gd_tp"),
+         "prog": lambda f: 1 if getattr(f, "teleporting", False) else 0},
     ],
     "Barrion": [
         {"nom": "Spin", "seq": ["<<  <<", ">>  >>"], "sep": "or",
          "note": "Double-tap a direction - beware, a FRESH shield reflects it",
-         "detect": lambda f, d: d > 0 and getattr(f, "spinning", False)},
+         "detect": lambda f, d: d > 0 and getattr(f, "spinning", False),
+         "prog": lambda f: 2 if getattr(f, "spinning", False) else 0},
         {"nom": "Hammer Leap", "seq": ["UP"],
          "note": "Leaping hammer strike - the old knight has no dodge",
          "detect": lambda f, d: (d > 0 and getattr(f, "jumping_attack", False)
-                                 and not getattr(f, "hit_down", False))},
+                                 and not getattr(f, "hit_down", False)),
+         "prog": lambda f: (1 if (getattr(f, "jumping_attack", False)
+                                  and not getattr(f, "hit_down", False)) else 0)},
         {"nom": "Sky Slam", "seq": ["UP", "AIR M2"],
          "note": "Crash down mid-leap - the hammer shakes the ground",
-         "detect": lambda f, d: d > 0 and getattr(f, "hit_down", False)},
+         "detect": lambda f, d: d > 0 and getattr(f, "hit_down", False),
+         "prog": lambda f: (2 if getattr(f, "hit_down", False)
+                            else 1 if getattr(f, "jumping_attack", False) else 0)},
     ],
 }
