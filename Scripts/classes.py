@@ -1504,8 +1504,8 @@ class Lysandra(Fighter):
 
     ICON = "assets/characters/Hero Knight/Icon.png"   # icone 26px pour le menu
 
-    POIDS_MAX_F = 54               # ~1,8 s de marche vers l'ennemi = poids plein
-    POIDS_BONUS = 0.35             # +35% de degats a poids plein (consomme par le coup)
+    POIDS_MAX_F = 28               # ~0,9 s de marche vers l'ennemi = poids plein (charge VITE)
+    POIDS_BONUS = 0.50             # +50% de degats a poids plein (consomme par le coup)
     COLERE_BONUS = 0.35            # +35% au plancher de vie...
     COLERE_HAUT = 0.60             # ... la colere demarre sous 60% PV
     COLERE_BAS = 0.20              # ... et plafonne a 20% PV
@@ -4903,7 +4903,7 @@ MOVES_GUIDE = {
          "detect": lambda f, d: d > 0 and getattr(f, "_seisme_conso", 1.0) > 1.05,
          "prog": lambda f: 1 if getattr(f, "_seisme_gel", False) else 0},
         {"nom": "Grinding March", "seq": ["WALK AT FOE", "HIT"],
-         "note": "Marching at the foe loads her blow (up to +35%) - stopping bleeds it away",
+         "note": "Marching at the foe loads her blow fast (up to +50%) - stopping bleeds it away",
          "detect": lambda f, d: d > 0 and getattr(f, "_marche_conso", 0) >= 0.5,
          "prog": lambda f: 1 if getattr(f, "poids", 0) >= f.POIDS_MAX_F * 0.5 else 0},
         {"nom": "Unbreakable", "seq": ["M1 / M2"],

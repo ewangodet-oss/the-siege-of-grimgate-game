@@ -1082,7 +1082,7 @@ def t_lysandra_kit():
     l.poids = classes.Lysandra.POIDS_MAX_F
     l.attack_type = 1; d.health = d.max_health; l.health = l.max_health
     m = l.mult_degats(d)
-    assert abs(m - 1.35) < 0.02, "poids plein = +35%% (recu %.2f)" % m
+    assert abs(m - 1.50) < 0.02, "poids plein = +50%% (recu %.2f)" % m
     l.coup_touche(d, False)
     assert l.poids == 0, "le coup consomme le poids"
 

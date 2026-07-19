@@ -874,6 +874,20 @@ def detecter_sons_combat(f, o):
             f._snd_swing_ok = True
     f._snd_atk = atk
     f._snd_cle = cle if atk else None
+    # ----- Lysandra : l'abattee de M2 FRAPPE LE SOL -> l'impact sonne MEME dans le vide
+    # (sinon le coup est plat, comme le marteau de Barrion). Pas de doublon : si le coup
+    # a connecte (damage_dealt), le son de hit normal / bouclier joue deja. -----
+    cfg_f = getattr(f, "config", None)
+    if (atk and perso and cfg_f and cfg_f.get("seisme")
+            and getattr(f, "action", None) == getattr(f, "actions", {}).get("attack2")
+            and not getattr(f, "_snd_sol_ok", False)
+            and (getattr(f, "frame_index", 0) + 1) > cfg_f["attacks"][2]["frame"]
+            and not getattr(f, "damage_dealt", False)):
+        h = perso.get("hit")
+        _joue(h.get(2) if isinstance(h, dict) else h)
+        f._snd_sol_ok = True
+    if not atk:
+        f._snd_sol_ok = False
     # ----- Changement d'arme (Konrad) : 'choose' -----
     wpn = getattr(f, "current_weapon", None)
     if wpn is not None and wpn != f._snd_wpn:
