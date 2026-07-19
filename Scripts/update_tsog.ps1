@@ -42,7 +42,10 @@ try {
     Write-Host 'Extracting...'
     $tmp = Join-Path $env:TEMP 'tsog_update_files'
     if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+    Unblock-File $zip -ErrorAction SilentlyContinue      # retire la marque "internet"
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
+    # ceinture+bretelles : aucun fichier extrait ne doit garder de marque internet
+    Get-ChildItem $tmp -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
     # zip avec ou sans dossier racine unique : on vise le dossier qui contient Scripts/
     $src = $tmp
     $unique = @(Get-ChildItem $tmp)
