@@ -1590,7 +1590,7 @@ class KonradForgeval:
         title = pygame.image.load("assets/characters/Ecuyer/title.png").convert_alpha()
         self.title = pygame.transform.scale(title, (220.45, 45))
         self.title_x_right = 1339.55
-        self.weapon_font = pygame.font.Font("assets/fonts/PirataOne.ttf", 40)
+        self.weapon_font = pygame.font.Font("assets/fonts/OldLondon.ttf", 40)
 
     def load_image(self, sprite_sheet):
         """Découpe la sprite sheet en tenant compte de la colonne de depart

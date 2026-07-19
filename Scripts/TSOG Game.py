@@ -1150,8 +1150,8 @@ ANIMATION_FRAMES_LIST = ["1.jpg", "2.jpg", "3.jpg", "4.jpg", "5.jpg", "6.jpg", "
 font_title = pygame.font.Font("assets/fonts/OldLondon.ttf", 130)
 font_title1 = pygame.font.Font("assets/fonts/OldLondon.ttf", 75)
 font_title2 = pygame.font.Font("assets/fonts/OldLondon.ttf", 150)
-font_small = pygame.font.Font("assets/fonts/PirataOne.ttf", 50)
-font_medium = pygame.font.Font("assets/fonts/PirataOne.ttf", 70)
+font_small = pygame.font.Font("assets/fonts/OldLondon.ttf", 50)
+font_medium = pygame.font.Font("assets/fonts/OldLondon.ttf", 70)
 _f_version = pygame.font.SysFont("segoeui,arial", 20)   # version (police CLASSIQUE, coin du menu)
 
 
@@ -2577,7 +2577,7 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
                ("Sound effects", "Epidemic Sound"),
                ("Voices", "Fish Audio"),
                ("Map backgrounds", "Imgur  ·  Reddit  ·  Pinterest"),
-               ("Fonts", "Dieter Steffmann  ·  Rui Abreu"),
+               ("Fonts", "Dieter Steffmann"),
                ("Development", "Skakay")]
     f_cred_cat = pygame.font.SysFont("georgia,timesnewroman,serif", 24, italic=True)
     f_cred_nom = pygame.font.SysFont("segoeui,arial", 34, bold=True)
@@ -2877,7 +2877,7 @@ def choose(perso1="Kenshi", perso2="Lysandra", presel=False):
     LEFT_CX, RIGHT_CX = 430, 1170
     BASELINE = 560              # niveau des pieds des combattants (dans le cadre)
     FRAME_W, FRAME_H, FRAME_CY, FRAME_MARGE = 300, 450, 358, 16   # cadre metal des previews
-    font_lore = pygame.font.Font("assets/fonts/PirataOne.ttf", 34)
+    font_lore = pygame.font.Font("assets/fonts/OldLondon.ttf", 34)
 
     # Roster d'icones en bas (tuiles d'acier). Button -> hover/clic ; dessin custom.
     TILE, ICON_PX, gap = 100, 78, 30
@@ -3063,7 +3063,7 @@ def choose_map(perso1, perso2):
     positionne sur la carte (MAPS[...]['pos']). Une fois une map choisie -> bouton Fight."""
     global MAP_ACTUELLE
     TH_W, TH_H, M = 100, 60, 7                     # petit cadre-marqueur (miniature + marge)
-    font_tip = pygame.font.Font("assets/fonts/PirataOne.ttf", 32)   # nom au survol
+    font_tip = pygame.font.Font("assets/fonts/OldLondon.ttf", 32)   # nom au survol
     sel_map = MAP_ACTUELLE if MAP_ACTUELLE in MAPS else None
     survol_prev = None
     button_back = Button(50, 800, "Back", 190, 64)
@@ -3253,8 +3253,8 @@ def afficher_victoire(perso1, perso2, gagnant, background_surface):
               for im, dxv in _fr]
     BASELINE = 602                     # pieds du vainqueur
     glow = _glow_radial(300, col_joueur)
-    font_flavor = pygame.font.Font("assets/fonts/PirataOne.ttf", 48)
-    font_sub = pygame.font.Font("assets/fonts/PirataOne.ttf", 34)
+    font_flavor = pygame.font.Font("assets/fonts/OldLondon.ttf", 48)
+    font_sub = pygame.font.Font("assets/fonts/OldLondon.ttf", 34)
 
     # Fond PROPRE = la map seule (floutee), SANS le HUD du combat (K.O., barres de vie,
     # titres des persos) qui surchargeait l'ecran. On n'utilise donc pas la frame finale.
@@ -4085,9 +4085,9 @@ def popup_raccourcis():
 # ----------------------------------------------------------------------
 #  MULTIJOUEUR LAN (lockstep). Fond neutre pour l'instant (fond dedie a venir).
 # ----------------------------------------------------------------------
-_f_nom = pygame.font.Font("assets/fonts/PirataOne.ttf", 42)     # nom de session / saisie
-_f_corps = pygame.font.Font("assets/fonts/PirataOne.ttf", 32)   # texte courant
-_f_hint = pygame.font.Font("assets/fonts/PirataOne.ttf", 24)    # petites infos
+_f_nom = pygame.font.Font("assets/fonts/OldLondon.ttf", 42)     # nom de session / saisie
+_f_corps = pygame.font.Font("assets/fonts/OldLondon.ttf", 32)   # texte courant
+_f_hint = pygame.font.Font("assets/fonts/OldLondon.ttf", 24)    # petites infos
 _f_sys = pygame.font.SysFont("consolas,segoeui,arial", 28, bold=True)   # code/IP : police CLASSIQUE lisible
 
 
@@ -4894,7 +4894,7 @@ def choose_perso_training(perso_actuel="Kenshi"):
     survole_prev = None
     FRAME_W, FRAME_H, FRAME_CY, FRAME_MARGE = 300, 452, 356, 16
     BASELINE = 560
-    font_lore = pygame.font.Font("assets/fonts/PirataOne.ttf", 34)
+    font_lore = pygame.font.Font("assets/fonts/OldLondon.ttf", 34)
     TILE, ICON_PX, gap = 100, 78, 30
     icones = {nom: pygame.transform.scale(
         pygame.image.load(PERSONNAGES[nom].ICON).convert_alpha(), (ICON_PX, ICON_PX))
