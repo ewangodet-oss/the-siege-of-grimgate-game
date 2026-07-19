@@ -117,7 +117,7 @@ SETTINGS = charger_settings()
 #parametres de l'ecran
 SCREEN_WIDTH = 1600
 SCREEN_HEIGHT = 900
-VERSION = "beta-1.0"        # affichee discretement dans un coin du menu principal
+VERSION = "beta-1.1"        # affichee discretement dans un coin du menu principal
 
 # ---------------------------------------------------------------------------
 #  MISE A JOUR AUTO (passive). Au lancement, un thread interroge GitHub (release
