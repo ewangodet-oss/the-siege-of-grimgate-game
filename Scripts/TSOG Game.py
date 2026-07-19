@@ -5140,6 +5140,8 @@ def jouer_entrainement(perso):
     RESET_DELAY = 40                                      # battement (frames) apres la fin des coups -> reset
     hp_aff = trail_aff = BARRE_MAX; repos_timer = 0; bar_delay = 0   # barre de vie du mannequin
     fhud = pygame.font.SysFont("consolas,arial", 26, bold=True)
+    fdeg = pygame.font.SysFont("consolas,arial", 38, bold=True)   # compteur de degats cumules
+    deg_cumul = 0.0; deg_timer = 0                # coups rapproches -> UN nombre qui grossit
     shield_mode = "off"      # bouclier du mannequin : off / always / on_hit (menu Custom Dummy)
 
     while True:
@@ -5212,6 +5214,15 @@ def jouer_entrainement(perso):
             reussi = _combo_reussi(joueur, combo_actif, degats)
         if degats > 0 and not dummy.mourant:                  # son de coup encaisse
             jouer_sfx(SONS_DUMMY["hit"], GAIN_COMBAT, cat="perso")
+        # COMPTEUR DE DEGATS (sous la barre du mannequin) : les coups rapproches se
+        # CUMULENT en un seul nombre ; il s'efface apres un court silence.
+        if degats > 0 and not dummy.mourant:
+            if deg_timer <= 0:
+                deg_cumul = 0.0                   # nouvelle serie
+            deg_cumul += degats
+            deg_timer = 55                        # ~1,8 s, relancee a chaque coup
+        elif deg_timer > 0:
+            deg_timer -= 1
         # GUIDE (combo/move) : la reussite ne CASSE PLUS le mannequin (ca creait des
         # etats bizarres avec les moves multi-hit) -> flash "Success !" + petit son.
         if reussi and succes_timer <= 0:
@@ -5284,6 +5295,10 @@ def jouer_entrainement(perso):
         draw_healthbar(joueur.max_health, joueur.health, joueur.trail_health, 20, 20)
         _DX = SCREEN_WIDTH - 420
         draw_healthbar(BARRE_MAX, hp_aff, trail_aff, _DX, 20)             # vraie barre (les 2 modes)
+        if deg_timer > 0 and deg_cumul > 0:       # degats cumules de la serie en cours
+            _dt = fdeg.render("-%d" % round(deg_cumul), True, (255, 116, 84))
+            _dt.set_alpha(min(255, deg_timer * 14))                       # fondu de sortie
+            screen.blit(_dt, (_DX, 52))
         if shield_mode != "off":                          # rappel du mode bouclier du mannequin
             _sl = "Shield: %s" % ("Always block" if shield_mode == "always" else "Block when hit")
             _si = fhud.render(_sl, True, (150, 205, 255))
