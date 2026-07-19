@@ -62,9 +62,10 @@ _RESET = dict(attacking=False, attack_cd=0, hit=False, block=False, block_cd=0,
               _dodge_fwd=False, _dodge_lift=0.0, dodge_dir=-1,
               _dodge_dur=0, _dodge_speed=0, _dodge_hop=0,
               # kit Kenshi (passe-lame / flow / execution / dodge-cancel)
-              flow=0, _lame_fin=0, _lame_niv=0, _lame_derniere=0, _exec_active=False,
-              cancel_cd=0, nb_cancels=0, _pl_depart=None, _pl_croise=False,
-              _pl_dodge_prev=False, _flow_hp=None, _trail=None,
+              flow=0, _lame_fin=0, _lame_niv=0, _lame_derniere=0, _lame_atk=0,
+              _exec_active=False, cancel_cd=0, nb_cancels=0, _pl_depart=None,
+              _pl_croise=False, _pl_dodge_prev=False, _flow_hp=None, _trail=None,
+              _dodge_trav=False,
               # dummy
               mourant=False, respawn_timer=0)
 _CACHE = {}
@@ -723,16 +724,18 @@ def t_esquive():
         for flip in (False, True):
             dx, _, _, _ = _hop(cls, 500, flip)
             assert dx > 100, "%s : ennemi a gauche -> saut a DROITE (regard flip=%s, dx=%d)" % (cls.__name__, flip, dx)
-    # KENSHI (passe-lame) : EXCEPTION voulue -- de PRES son esquive TRAVERSE l'ennemi
-    # (elle va VERS lui pour le deposer dans son dos) ; de LOIN elle fuit normalement.
+    # KENSHI (passe-lame) : EXCEPTION voulue -- de PRES son esquive est un DASH RASANT qui
+    # TRAVERSE l'ennemi (le depose dans son dos) ; de LOIN elle fuit en SAUTANT normalement.
     for flip in (False, True):
         dx, h, inv, cd = _hop(classes.Kenshi, 900, flip)          # proche (200 px < seuil 300)
         assert dx > 100, "Kenshi proche : l'esquive doit TRAVERSER vers l'ennemi (dx=%d)" % dx
-        assert h > 80 and inv and cd > 0, "Kenshi : saut haut + invulnerable + cooldown"
+        assert h <= 40, "Kenshi proche : dash RASANT, pas un saut (hauteur=%d)" % h
+        assert inv and cd > 0, "Kenshi : invulnerable + cooldown"
         dx, _, _, _ = _hop(classes.Kenshi, 500, flip)             # proche, ennemi a gauche
         assert dx < -100, "Kenshi proche (ennemi a gauche) : traverse vers la GAUCHE (dx=%d)" % dx
-        dx, _, _, _ = _hop(classes.Kenshi, 1400, flip)            # LOIN (700 px > seuil)
+        dx, h, _, _ = _hop(classes.Kenshi, 1400, flip)            # LOIN (700 px > seuil)
         assert dx < -100, "Kenshi loin : l'esquive doit FUIR a l'oppose (dx=%d)" % dx
+        assert h > 80, "Kenshi loin : fuite SAUTEE classique (hauteur=%d)" % h
     # AGILITE : on doit SENTIR la difference -- Kenshi (agile) esquive plus VITE (airtime court)
     # que Stormr (normal), lui-meme plus vif que Lysandra (tres lourde).
     def _airtime(cls):
@@ -950,27 +953,39 @@ def t_kenshi_kit():
     e = 1.0
     assert k.max_health == 280, "Kenshi doit etre le glass cannon (280 PV), a %s" % k.max_health
 
-    # 1) ESQUIVE TRAVERSANTE : de pres, l'esquive part VERS l'ennemi ; de loin, a l'oppose.
+    # 1) ESQUIVE TRAVERSANTE : de pres, un DASH RASANT VERS l'ennemi ; de loin, fuite sautee.
     k.rect.centerx = 700; d.rect.centerx = 900          # proche (200 < seuil 300)
     k._dodge_up_prev = False
     classes.demarrer_esquive(k, True, e, d)
     assert k.dodging and k.dodge_dir == 1, "de pres l'esquive doit TRAVERSER (vers l'ennemi)"
+    assert k._dodge_trav and k._dodge_hop == 0, "la traversee est un DASH rasant (pas de saut)"
     k.dodging = False; k.dodge_cd = 0; k._pl_depart = None; k._pl_dodge_prev = False
+    classes.demarrer_esquive(k, False, e, d)            # frame suivante : fin de dash
+    assert not getattr(k, "dashing", False) and not k._dodge_trav, "poussiere de dash coupee a la fin"
     k.rect.centerx = 200                                # loin (700 > seuil)
     k._dodge_up_prev = False
     classes.demarrer_esquive(k, True, e, d)
     assert k.dodging and k.dodge_dir == -1, "de loin l'esquive doit FUIR (a l'oppose)"
+    assert not k._dodge_trav and k._dodge_hop > 0, "de loin : saut classique (pas un dash)"
 
-    # 2) FENETRE DE LAME : traversee simulee -> retombee -> niveau 2 ; consommee par un coup.
+    # 2) FENETRE DE LAME : traversee -> retombee FACE a l'ennemi -> fenetre transferee a
+    #    l'attaque lancee pendant la fenetre, puis consommee par le coup qui connecte.
     k.dodging = False; k.dodge_cd = 0
-    k._pl_depart = 1; k._pl_croise = True; k._pl_dodge_prev = True
+    k.rect.centerx = 1000                               # retombe a DROITE de l'ennemi (900)
+    k.flip = False                                      # regard a droite (dos a l'ennemi)
+    k._pl_depart = -1; k._pl_croise = True; k._pl_dodge_prev = True
     classes.demarrer_esquive(k, False, e, d)            # frame suivante : retombee detectee
     assert k.lame_niveau() == 2, "traversee retombee -> fenetre passe-lame (niv 2)"
+    assert k.flip == True, "il doit atterrir RETOURNE face a l'ennemi traverse"
+    k.attacking = False; k.attack_cd = 0
+    k.attack(SURF, d)                                   # attaque lancee PENDANT la fenetre
+    assert k._lame_atk == 2 and k.lame_niveau() == 0, "fenetre transferee a l'attaque lancee"
     d.health = d.max_health
     assert abs(k.mult_degats(d) - 1.5) < 1e-6, "passe-lame = degats x1.5"
     k.coup_touche(d, False)
-    assert k.lame_niveau() == 0, "la fenetre doit etre CONSOMMEE par le coup"
+    assert k._lame_atk == 0, "le buff doit etre CONSOMME par le coup"
     assert k._lame_derniere == 2 and k.flow == 1, "coup buffe memorise + 1 stack de flow"
+    k.attacking = False
 
     # 3) FLOW : stacks (max 3), esquive qui recharge plus vite, reset si on perd de la vie.
     k.coup_touche(d, False); k.coup_touche(d, False); k.coup_touche(d, False)
@@ -982,12 +997,12 @@ def t_kenshi_kit():
     k.update(SURF, d)
     assert k.flow == 0, "perdre de la vie doit remettre le flow a zero"
 
-    # 4) EXECUTION : cible sous 25% -> x1.3 (et x1.3*1.5 si lame niv 2 en meme temps).
+    # 4) EXECUTION : cible sous 25% -> x1.3 (et x1.3*1.5 si le coup porte la lame niv 2).
     d.health = d.max_health * 0.2
     assert abs(k.mult_degats(d) - 1.3) < 1e-6, "execution = x1.3 sous 25%% PV"
-    k._lame_fin = classes.temps_actif_ms() + 500; k._lame_niv = 2
+    k._lame_atk = 2
     assert abs(k.mult_degats(d) - 1.95) < 1e-6, "lame x1.5 * execution x1.3 = x1.95"
-    k._lame_fin = 0
+    k._lame_atk = 0
 
     # 5) DODGE-CANCEL : Haut pendant une attaque coupe l'attaque en esquive (cd dedie).
     k.dodging = False; k.dodge_cd = 0; k.cancel_cd = 0; k._dodge_up_prev = False

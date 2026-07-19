@@ -535,7 +535,7 @@ def esquive_params(f):
             pr.get("iframes", ESQUIVE_IFRAMES), pr.get("cd", ESQUIVE_CD))
 
 
-LAME_FENETRE_MS = 660    # fenetre "lame affutee" apres une esquive de Kenshi (~20 frames actives)
+LAME_FENETRE_MS = 800    # fenetre "lame affutee" apres une esquive de Kenshi (~24 frames actives)
 
 
 def demarrer_esquive(f, U, e, target=None):
@@ -561,6 +561,10 @@ def demarrer_esquive(f, U, e, target=None):
     if getattr(f, "dodge_iframes", 0) > 0:
         f.dodge_iframes -= 1
     pr_cfg = (getattr(f, "config", None) or {}).get("esquive") or {}
+    # Traversee (dash rasant) terminee -> on coupe la poussiere de dash empruntee a Arinya.
+    if not f.dodging and getattr(f, "_dodge_trav", False):
+        f.dashing = False
+        f._dodge_trav = False
     # Suivi de la TRAVERSEE pendant le vol : le cote par rapport a la cible a-t-il change ?
     if f.dodging and target is not None and getattr(f, "_pl_depart", None) is not None:
         cote = 1 if f.rect.centerx >= target.rect.centerx else -1
@@ -572,6 +576,9 @@ def demarrer_esquive(f, U, e, target=None):
         if pr_cfg.get("traverse"):
             f._lame_niv = 2 if getattr(f, "_pl_croise", False) else 1
             f._lame_fin = temps_actif_ms() + LAME_FENETRE_MS
+            if getattr(f, "_pl_croise", False) and target is not None:
+                # Il atterrit FACE a l'ennemi traverse -> pret a frapper dans le dos.
+                f.flip = f.rect.centerx > target.rect.centerx
         f._pl_depart = None
     f._pl_dodge_prev = f.dodging
     up_press = U and not getattr(f, "_dodge_up_prev", False)
@@ -594,11 +601,13 @@ def demarrer_esquive(f, U, e, target=None):
         return
     # SENS = a l'OPPOSE de l'adversaire ; EXCEPTION "traverse" (Kenshi) : de PRES, l'esquive
     # passe AU TRAVERS de l'ennemi et le depose dans son dos (de loin : fuite normale).
+    trav_dash = False
     if target is not None:
         loin = 1 if f.rect.centerx >= target.rect.centerx else -1
         trav = pr_cfg.get("traverse")
         if trav and abs(f.rect.centerx - target.rect.centerx) < trav * e:
             f.dodge_dir = -loin                   # vers/au travers de l'ennemi
+            trav_dash = True
         else:
             f.dodge_dir = loin
         f._pl_depart = loin                       # cote de depart (pour detecter le croisement)
@@ -612,6 +621,9 @@ def demarrer_esquive(f, U, e, target=None):
     f.dodge_iframes = iframes
     f.dodge_cd = max(16, cd - 6 * getattr(f, "flow", 0))   # FLOW : l'esquive recharge plus vite
     f._dodge_dur = dur; f._dodge_speed = speed; f._dodge_hop = hop
+    f._dodge_trav = trav_dash
+    if trav_dash:
+        f._dodge_hop = 0                          # traversee = DASH RASANT (pas de saut)
 
 
 def esquive_dx(f, e):
@@ -1183,6 +1195,9 @@ class Fighter:
             self.vel_y = 0
             dy = (getattr(self, "GROUND", SOL) - self._dodge_lift) - self.rect.bottom   # petit saut en cloche
             self.jump = self._dodge_lift > 0.5     # anim de saut pendant le bond
+            if getattr(self, "_dodge_trav", False):
+                self.running = True                # traversee (Kenshi) : DASH rasant -> anim de course
+                self.dashing = True                #   + poussiere de dash (blocs dash de TSOG Game)
         # Traiter les inputs seulement si disponible
         elif self.attacking == False and self.alive == True and self.hit == False and self.block == False:
 
@@ -1568,16 +1583,26 @@ class Kenshi(Fighter):
             return getattr(self, "_lame_niv", 0)
         return 0
 
+    def attack(self, surface, target):
+        deja = self.attacking
+        super().attack(surface, target)
+        if self.attacking and not deja:
+            # La fenetre de lame s'applique a l'attaque LANCEE pendant la fenetre :
+            # sans ca, la montee de l'anim (~0,5 s avant l'impact) la faisait souvent
+            # expirer avant que le coup connecte -> boost jamais ressenti.
+            self._lame_atk = self.lame_niveau()
+            self._lame_fin = 0                    # fenetre transferee a CETTE attaque
+
     def mult_degats(self, target):
-        m = self.LAME_M.get(self.lame_niveau(), 1.0)
+        m = self.LAME_M.get(getattr(self, "_lame_atk", 0), 1.0)
         self._exec_active = target.health <= self.EXEC_SEUIL * target.max_health
         if self._exec_active:
             m *= self.EXEC_M                      # EXECUTION : achever un ennemi affaibli
         return m
 
     def coup_touche(self, target, bloque):
-        self._lame_derniere = self.lame_niveau()  # memorise le coup buff (Moves Guide)
-        self._lame_fin = 0                        # la fenetre est CONSOMMEE par ce coup
+        self._lame_derniere = getattr(self, "_lame_atk", 0)   # memorise le coup buff (guide)
+        self._lame_atk = 0                        # le buff est CONSOMME par ce coup
         if not bloque:
             self.flow = min(self.FLOW_MAX, getattr(self, "flow", 0) + 1)
 
@@ -1615,6 +1640,20 @@ class Kenshi(Fighter):
         for g in trail:
             surface.blit(g[0], g[1])
         super().draw(surface)
+        # Jauge de FLOW : 3 segments SOUS sa barre de vie (gris translucide = vide,
+        # blanc opaque = stack). Barres : Left x=20, Right x=1180, largeur 396.
+        seg_w, seg_h, gap = 56, 9, 8
+        total = 3 * seg_w + 2 * gap
+        bx = 20 if self.side == "Left" else 1180 + 396 - total
+        jauge = pygame.Surface((total, seg_h), pygame.SRCALPHA)
+        for i in range(self.FLOW_MAX):
+            x0 = i * (seg_w + gap)
+            if i < flow:
+                pygame.draw.rect(jauge, (246, 244, 238, 255), (x0, 0, seg_w, seg_h), 0, 3)
+            else:
+                pygame.draw.rect(jauge, (170, 170, 170, 70), (x0, 0, seg_w, seg_h), 0, 3)
+            pygame.draw.rect(jauge, (30, 27, 22, 160), (x0, 0, seg_w, seg_h), 1, 3)
+        surface.blit(jauge, (bx, 52))
 
 #----------------------------------------------------------------------------------------------------------------------
 
@@ -1802,6 +1841,9 @@ class KonradForgeval:
             self.vel_y = 0
             dy = (getattr(self, "GROUND", SOL) - self._dodge_lift) - self.rect.bottom   # petit saut en cloche
             self.jump = self._dodge_lift > 0.5     # anim de saut pendant le bond
+            if getattr(self, "_dodge_trav", False):
+                self.running = True                # traversee (Kenshi) : DASH rasant -> anim de course
+                self.dashing = True                #   + poussiere de dash (blocs dash de TSOG Game)
         # Traiter les inputs seulement si disponible
         elif not self.attacking and self.alive and not self.hit and not self.block:
             if BLOCK and not self.jump and self.block_cd == 0:
@@ -3010,6 +3052,9 @@ class Stormr:
             self.vel_y = 0
             dy = (getattr(self, "GROUND", SOL) - self._dodge_lift) - self.rect.bottom   # petit saut en cloche
             self.jump = self._dodge_lift > 0.5     # anim de saut pendant le bond
+            if getattr(self, "_dodge_trav", False):
+                self.running = True                # traversee (Kenshi) : DASH rasant -> anim de course
+                self.dashing = True                #   + poussiere de dash (blocs dash de TSOG Game)
         # --- Deplacement (pas pendant une attaque) ---
         elif peut_agir and not self.attacking and not self.block:
             if BLOCK and not self.jump and self.block_cd == 0:
@@ -4656,11 +4701,11 @@ MOVES_GUIDE = {
         {"nom": "Blade Through", "seq": ["UP  (close)", "M1 / M2"],
          "note": "Up close your dodge cuts THROUGH the foe - strike his back for +50%",
          "detect": lambda f, d: d > 0 and getattr(f, "_lame_derniere", 0) == 2,
-         "prog": lambda f: 1 if f.lame_niveau() == 2 else 0},
+         "prog": lambda f: 1 if (f.lame_niveau() == 2 or getattr(f, "_lame_atk", 0) == 2) else 0},
         {"nom": "First Blood", "seq": ["UP", "M1 / M2"],
          "note": "Any clean dodge sharpens your next strike (+25%) for a moment",
          "detect": lambda f, d: d > 0 and getattr(f, "_lame_derniere", 0) >= 1,
-         "prog": lambda f: 1 if f.lame_niveau() >= 1 else 0},
+         "prog": lambda f: 1 if (f.lame_niveau() >= 1 or getattr(f, "_lame_atk", 0) >= 1) else 0},
         {"nom": "Dodge Cancel", "seq": ["M1 / M2", "UP"],
          "note": "Cut your own attack short with a dodge - escape a bad call",
          "detect": _d_dodge_cancel,
