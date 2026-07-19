@@ -4633,7 +4633,9 @@ def dessiner_guide_combo(surface, joueur, combo, tick):
     BH, BGAP = 66, 22
     largeurs = [max(66, _f_combo_badge.size(str(b))[0] + 26) for b in seq]   # badges a largeur variable
     total_w = sum(largeurs) + (len(seq) - 1) * BGAP
-    PANEL_W = max(total_w + 96, 440)
+    note = combo.get("note")
+    PANEL_W = max(total_w + 96, 440,
+                  (_f_combo_note.size(note)[0] + 84) if note else 0)   # la note tient TOUJOURS dedans (marge rivets)
     PANEL_H = 176 if est_move else 216      # move : pas de barre de timing -> panneau plus court
     px = SCREEN_WIDTH // 2 - PANEL_W // 2; py = 92   # EN HAUT, sous les barres de vie + l'indication
     plaque_metal(surface, pygame.Rect(px, py, PANEL_W, PANEL_H))   # panneau plaque de fer
@@ -4685,7 +4687,6 @@ def dessiner_guide_combo(surface, joueur, combo, tick):
         lab = _f_dev.render("PRESS on green", True, (150, 60, 50) if not dans else (30, 120, 55))
         surface.blit(lab, lab.get_rect(midtop=(SCREEN_WIDTH // 2, bary + BARH + 3)))
     # Note pedagogique (une ligne, bas du panneau) : le "pourquoi/quand" du move ou du combo
-    note = combo.get("note")
     if note:
         nt = _f_combo_note.render(note, True, (56, 44, 30))
         surface.blit(nt, nt.get_rect(center=(SCREEN_WIDTH // 2, py + PANEL_H - 24)))
@@ -5094,7 +5095,8 @@ def jouer_entrainement(perso):
 
     reset_horloge(); reset_horloge_active()
     idx = 0; anim_t = 0.0; tf = 0
-    combo_hits = 0; last_hit = -999; WINDOW = 45          # 3 coups en <1,5 s = combo
+    succes_timer = 0                                      # flash "Success !" du Moves Guide
+    prev_mourant = False                                  # front de respawn -> vie pleine
     prev_jump = False
     prev_dash = False                                     # poussiere de dash (Arinya), cf. versus
     chute_jouee = True                                   # son de chute de la moitie haute (1x/mort)
@@ -5102,8 +5104,7 @@ def jouer_entrainement(perso):
     # Barre de vie INDICATIVE du mannequin (BARRE_MAX = HP de reference, reglable dans la pause).
     BARRE_MAX = 320.0
     RESET_DELAY = 40                                      # battement (frames) apres la fin des coups -> reset
-    cumul_deg = 0.0                                       # LIBRE : jauge rouge de degats cumules (cap)
-    hp_aff = trail_aff = BARRE_MAX; repos_timer = 0; bar_delay = 0   # COMBO : vrais degats + reset differe
+    hp_aff = trail_aff = BARRE_MAX; repos_timer = 0; bar_delay = 0   # barre de vie du mannequin
     fhud = pygame.font.SysFont("consolas,arial", 26, bold=True)
     shield_mode = "off"      # bouclier du mannequin : off / always / on_hit (menu Custom Dummy)
 
@@ -5116,21 +5117,21 @@ def jouer_entrainement(perso):
                 r = pause_entrainement(perso_courant, BARRE_MAX, shield_mode)
                 if r == "menu": arreter_ambiance_map(); return MENU_ACCUEIL
                 if r == "quit": arreter_ambiance_map(); return "quitter"
-                if isinstance(r, tuple) and r[0] == "combo":   # combo a entrainer (ou None = libre)
-                    combo_actif = r[1]; combo_hits = 0
-                    cumul_deg = 0.0; hp_aff = trail_aff = BARRE_MAX; repos_timer = 0
+                if isinstance(r, tuple) and r[0] == "combo":   # combo/move a entrainer (None = libre)
+                    combo_actif = r[1]; succes_timer = 0
+                    hp_aff = trail_aff = BARRE_MAX; repos_timer = 0
                 elif isinstance(r, tuple) and r[0] == "shield":   # bouclier du mannequin
                     shield_mode = r[1]
                 elif isinstance(r, tuple) and r[0] == "hp":    # HP custom du mannequin
                     BARRE_MAX = float(r[1])
-                    cumul_deg = 0.0; hp_aff = trail_aff = BARRE_MAX; repos_timer = 0
+                    hp_aff = trail_aff = BARRE_MAX; repos_timer = 0
                 elif r in PERSONNAGES:                    # changement de perso -> meme position
                     perso_courant = r
                     cx = joueur.rect.centerx
                     joueur = _creer(r); joueur.rect.centerx = cx
-                    combo_hits = 0
-                    combo_actif = None                    # combo remis a zero au changement de perso
-                    cumul_deg = 0.0; hp_aff = trail_aff = BARRE_MAX; repos_timer = 0
+                    succes_timer = 0
+                    combo_actif = None                    # guide remis a zero au changement de perso
+                    hp_aff = trail_aff = BARRE_MAX; repos_timer = 0
         # PAS de hitstop en entrainement : tout avance a chaque frame -> l'indicateur de combo
         # ne se fige jamais et aucun appui (ex : finisher de Stormr) n'est perdu.
         avancer_horloge(); avancer_horloge_active(); tf += 1
@@ -5175,31 +5176,38 @@ def jouer_entrainement(perso):
             reussi = bool(combo_actif["detect"](joueur, degats))
         else:
             reussi = _combo_reussi(joueur, combo_actif, degats)
-        if degats > 0 and not dummy.mourant and not reussi:   # son de coup encaisse
+        if degats > 0 and not dummy.mourant:                  # son de coup encaisse
             jouer_sfx(SONS_DUMMY["hit"], GAIN_COMBAT, cat="perso")
-        if combo_actif is None:
-            # ENTRAINEMENT LIBRE : 3 coups rapproches -> brise en 2
-            if degats > 0:
-                combo_hits = combo_hits + 1 if (tf - last_hit) <= WINDOW else 1
-                last_hit = tf
-                if combo_hits >= 3 and not dummy.mourant:
-                    dummy.tuer()
-                    jouer_sfx(SONS_DUMMY["break"], GAIN_COMBAT, cat="perso")
-                    chute_jouee = False
-                    combo_hits = 0
-        elif reussi:
-            # ENTRAINEMENT D'UN COMBO : brise UNIQUEMENT quand le dernier coup connecte
-            dummy.tuer()
-            jouer_sfx(SONS_DUMMY["break"], GAIN_COMBAT, cat="perso")
-            chute_jouee = False
+        # GUIDE (combo/move) : la reussite ne CASSE PLUS le mannequin (ca creait des
+        # etats bizarres avec les moves multi-hit) -> flash "Success !" + petit son.
+        if reussi and succes_timer <= 0:
+            succes_timer = 55
+            jouer_sfx_click()
         # La moitie haute brisee touche le sol (frame FALL_FRAME de l'anim de mort).
         if dummy.mourant and not chute_jouee and dummy.frame_index >= dummy.FALL_FRAME:
             jouer_sfx(SONS_DUMMY["fall"], GAIN_COMBAT, cat="perso")
             chute_jouee = True
-        # --- Barre de vie INDICATIVE du mannequin ---
+        # --- Barre de vie du mannequin ---
+        if prev_mourant and not dummy.mourant:            # il vient de se relever -> vie PLEINE
+            hp_aff = trail_aff = BARRE_MAX; repos_timer = 0
+        prev_mourant = dummy.mourant
         if combo_actif is None:
-            if degats > 0:                                # LIBRE : jauge rouge cumulative (cap, ne se vide pas)
-                cumul_deg = min(BARRE_MAX, cumul_deg + degats)
+            # LIBRE : vraie barre de vie. A ZERO -> le mannequin se brise, puis
+            # reapparait avec sa vie pleine (reset au respawn ci-dessus).
+            if degats > 0 and not dummy.mourant:
+                if trail_aff < hp_aff:
+                    trail_aff = hp_aff
+                hp_aff = max(0.0, hp_aff - degats)
+                bar_delay = TRAIL_DELAY
+                if hp_aff <= 0:
+                    dummy.tuer()
+                    jouer_sfx(SONS_DUMMY["break"], GAIN_COMBAT, cat="perso")
+                    chute_jouee = False
+            if trail_aff > hp_aff:                        # trail rouge qui rattrape
+                if bar_delay > 0: bar_delay -= 1
+                else: trail_aff = max(hp_aff, trail_aff - TRAIL_SPEED)
+            else:
+                trail_aff = hp_aff
         else:                                             # COMBO : vrais degats, RESET differe
             if degats > 0:
                 if hp_aff >= BARRE_MAX:                    # nouveau cycle -> on repart de plein
@@ -5241,27 +5249,26 @@ def jouer_entrainement(perso):
         # Barres de vie : joueur (gauche) + mannequin (droite = INDICATEUR de degats)
         draw_healthbar(joueur.max_health, joueur.health, joueur.trail_health, 20, 20)
         _DX = SCREEN_WIDTH - 420
-        if combo_actif is None:
-            draw_healthbar(BARRE_MAX, BARRE_MAX, BARRE_MAX, _DX, 20)      # or PLEIN (ne se vide jamais)
-            _dr = min(1.0, cumul_deg / BARRE_MAX)                         # jauge ROUGE = degats cumules (cap)
-            if _dr > 0:
-                pygame.draw.rect(screen, (210, 55, 45), (_DX, 20, int(396 * _dr), 26))
-        else:
-            draw_healthbar(BARRE_MAX, hp_aff, trail_aff, _DX, 20)         # vrais degats + trail + reset
+        draw_healthbar(BARRE_MAX, hp_aff, trail_aff, _DX, 20)             # vraie barre (les 2 modes)
         if shield_mode != "off":                          # rappel du mode bouclier du mannequin
             _sl = "Shield: %s" % ("Always block" if shield_mode == "always" else "Block when hit")
             _si = fhud.render(_sl, True, (150, 205, 255))
             screen.blit(_si, _si.get_rect(topright=(SCREEN_WIDTH - 24, 54)))
         hint = ("Follow the guide   -   ESC : pause" if combo_actif
-                else "Land 3 hits to break the dummy   -   ESC : pause")
+                else "Deplete its bar to break the dummy   -   ESC : pause")
         info = fhud.render(hint, True, (238, 228, 205))
         screen.blit(info, info.get_rect(midtop=(SCREEN_WIDTH // 2, 58)))   # SOUS les barres de vie
-        if combo_actif:                                   # aide visuelle du combo (sous l'indication)
+        if combo_actif:                                   # aide visuelle du guide (sous l'indication)
             dessiner_guide_combo(screen, joueur, combo_actif, tf)
-        elif combo_hits > 0:
-            col = GOLD if combo_hits < 3 else (255, 95, 70)
-            c = fhud.render("Combo  x%d" % combo_hits, True, col)
-            screen.blit(c, c.get_rect(center=(SCREEN_WIDTH // 2, 100)))
+            if succes_timer > 0:                          # move/combo reussi -> flash sous le panneau
+                succes_timer -= 1
+                _p = 0.5 + 0.5 * math.sin(tf * 0.35)
+                st = police_acier(52).render("Success !", True,
+                                             (110 + int(70 * _p), 235, 130))
+                so = police_acier(52).render("Success !", True, (12, 30, 14))
+                r_st = st.get_rect(midtop=(SCREEN_WIDTH // 2, 322))
+                screen.blit(so, (r_st.x + 2, r_st.y + 3))
+                screen.blit(st, r_st)
         disperser_si_besoin()                            # dissipe la brume de transition a l'arrivee
         pygame.display.flip()                            # pas de curseur pendant le combat
 

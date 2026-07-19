@@ -4515,6 +4515,9 @@ MOVES_GUIDE = {
         {"nom": "Spear Pickup", "seq": ["WALK ON IT"],
          "note": "Bare-handed after a throw - reclaim your spear on the ground",
          "detect": _d_ramassage_lance},
+        {"nom": "Dash", "seq": ["<<  <<", "or  >>  >>"],
+         "note": "Double-tap a direction - quick burst to close in or retreat",
+         "detect": lambda f, d: _front(f, "dashing", "_gd_dash")},
         dict(_M_ESQUIVE),
     ],
     "Stormr": [
