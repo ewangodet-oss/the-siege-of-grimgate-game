@@ -4643,6 +4643,12 @@ def dessiner_guide_combo(surface, joueur, combo, tick):
     est_move = "detect" in combo   # entree du Moves Guide (validation par detect, pas par profondeur)
     cs = 0 if est_move else max(0, min(_profondeur_combo(joueur), len(seq)))
     BH, BGAP = 66, 22
+    # Separateur entre badges : fleche = ENCHAINEMENT (defaut) ; texte "sep" (ex "or")
+    # = ALTERNATIVE (spin/dash : gauche OU droite) -> tous les badges s'allument pareil.
+    sep = combo.get("sep")
+    sep_img = _f_combo_badge.render(sep, True, (185, 175, 152)) if sep else None
+    if sep_img:
+        BGAP = max(BGAP, sep_img.get_width() + 20)
     largeurs = [max(66, _f_combo_badge.size(str(b))[0] + 26) for b in seq]   # badges a largeur variable
     total_w = sum(largeurs) + (len(seq) - 1) * BGAP
     note = combo.get("note")
@@ -4660,8 +4666,8 @@ def dessiner_guide_combo(surface, joueur, combo, tick):
         bx += largeurs[i] + BGAP
         if i < cs:
             fill, edge = (24, 54, 92), (90, 150, 230)           # deja enchaine -> BLEU (le vert = "presser")
-        elif i == cs:
-            p = 0.5 + 0.5 * math.sin(tick * 0.2)                # a presser -> pulse or
+        elif i == cs or sep:                                    # a presser (ou ALTERNATIVE : tous pareils)
+            p = 0.5 + 0.5 * math.sin(tick * 0.2)                # -> pulse or
             fill = (int(72 + 46 * p), int(52 + 38 * p), 14); edge = (255, int(198 + 42 * p), 72)
         else:
             fill, edge = (34, 32, 40), (108, 102, 90)           # a venir
@@ -4671,8 +4677,11 @@ def dessiner_guide_combo(surface, joueur, combo, tick):
         surface.blit(lab, lab.get_rect(center=r.center))
         if i < len(seq) - 1:
             ax = r.right + BGAP // 2
-            pygame.draw.polygon(surface, (150, 142, 120),
-                                [(ax - 5, r.centery - 7), (ax + 5, r.centery), (ax - 5, r.centery + 7)])
+            if sep_img:                                         # alternative : "or" entre les badges
+                surface.blit(sep_img, sep_img.get_rect(center=(ax, r.centery)))
+            else:                                               # enchainement : fleche "puis"
+                pygame.draw.polygon(surface, (150, 142, 120),
+                                    [(ax - 5, r.centery - 7), (ax + 5, r.centery), (ax - 5, r.centery + 7)])
     # Barre de timing : le curseur balaie de gauche a droite ; presser quand il atteint la
     # ZONE VERTE (la fenetre d'enchainement du coup en cours). Le curseur vire au vert vif dedans.
     # Pas de barre sur la DERNIERE attaque du combo (rien a enchainer apres).

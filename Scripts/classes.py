@@ -4515,7 +4515,7 @@ MOVES_GUIDE = {
         {"nom": "Spear Pickup", "seq": ["WALK ON IT"],
          "note": "Bare-handed after a throw - reclaim your spear on the ground",
          "detect": _d_ramassage_lance},
-        {"nom": "Dash", "seq": ["<<  <<", "or  >>  >>"],
+        {"nom": "Dash", "seq": ["<<  <<", ">>  >>"], "sep": "or",
          "note": "Double-tap a direction - quick burst to close in or retreat",
          "detect": lambda f, d: _front(f, "dashing", "_gd_dash")},
         dict(_M_ESQUIVE),
@@ -4532,7 +4532,7 @@ MOVES_GUIDE = {
          "detect": lambda f, d: _front(f, "teleporting", "_gd_tp")},
     ],
     "Barrion": [
-        {"nom": "Spin", "seq": ["<<  <<", "or  >>  >>"],
+        {"nom": "Spin", "seq": ["<<  <<", ">>  >>"], "sep": "or",
          "note": "Double-tap a direction - beware, a FRESH shield reflects it",
          "detect": lambda f, d: d > 0 and getattr(f, "spinning", False)},
         {"nom": "Hammer Leap", "seq": ["UP"],
