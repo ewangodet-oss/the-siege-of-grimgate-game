@@ -1532,7 +1532,7 @@ class Kenshi(Fighter):
     EXEC_SEUIL = 0.25              # Execution : cible sous 25% de sa vie max...
     EXEC_M = 1.3                   # ... -> degats x1.3
     FLOW_MAX = 3
-    FLOW_ANIM = 0.07               # -7% de ms/frame d'attaque par stack de Flow
+    FLOW_ANIM = 0.12               # -12% de ms/frame d'attaque par stack (-36% a 3 : ca se SENT)
     FLOW_GRACE_MS = 4500           # sans attaquer pendant 4,5 s...
     FLOW_DECAY_MS = 1000           # ... le Flow s'evente : -1 stack par seconde
 
@@ -4655,7 +4655,8 @@ class TrainingDummy(Fighter2):
         img = pygame.transform.flip(sprite_nuit(self.image), self.flip, False)
         if grace_active(self):
             img.set_alpha(130 if (temps_ms() // 66) % 2 else 220)   # grace : le sprite clignote
-        surface.blit(img, (self.rect.x - ox * e, self.rect.y - oy * e))
+        # +5 px : la base du mannequin flottait un poil au-dessus de l'herbe (ajust visuel)
+        surface.blit(img, (self.rect.x - ox * e, self.rect.y - oy * e + 5 * e))
         # Bouclier quand il bloque (mode Shield du Custom Dummy) : sprite selon l'usure, comme
         # les persos. Maintenu qq frames apres un coup pris de dos en gardant (garde_hold) pour
         # qu'il ne clignote pas pendant l'anim de get-hit.
