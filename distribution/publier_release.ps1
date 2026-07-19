@@ -78,4 +78,10 @@ Write-Host "Creation de la release '$version' sur $githubRepo ..."
 gh release create $version $zip --repo $githubRepo --title "The Siege of Grimgate $version" `
     --notes "Portable Windows build. Download the zip, extract it and run 'Jouer TSOG.bat'."
 if ($LASTEXITCODE -ne 0) { throw 'gh release create a echoue (deja publiee ? pas authentifie ?)' }
+# Copie sous nom STABLE : le lien direct .../releases/latest/download/TSOG-win.zip
+# pointe TOUJOURS vers la derniere version (a mettre sur la page itch.io).
+$zipStable = Join-Path $out 'TSOG-win.zip'
+Copy-Item $zip $zipStable -Force
+gh release upload $version $zipStable --repo $githubRepo --clobber
+if ($LASTEXITCODE -ne 0) { throw "upload de l'asset stable TSOG-win.zip a echoue" }
 Write-Host "=== Release $version publiee ! Les installers/updaters la verront immediatement. ===" -ForegroundColor Green
