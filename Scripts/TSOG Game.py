@@ -1277,7 +1277,7 @@ def police_acier(taille):
 def police_bouton(rect, texte):
     """Police calee sur la HAUTEUR du bouton (texte d'autant plus imposant que le
     bouton est grand), reduite si le texte deborde en largeur."""
-    taille = int(rect.height * 0.56)
+    taille = int(rect.height * 0.72)
     f = police_acier(taille)
     while taille > 16 and f.size(texte)[0] > rect.width - 46:
         taille -= 2
@@ -1311,9 +1311,13 @@ def dessiner_bouton_metal(surf, rect, texte, hover, police=None):
         police = police_bouton(rect, texte)
     ombre = police.render(texte, True, (26, 22, 16))
     haut = police.render(texte, True, coul)
-    cr = haut.get_rect(center=rect.center)
-    surf.blit(ombre, (cr.x + 2, cr.y + 3))
-    surf.blit(haut, cr)
+    # Centrage OPTIQUE : boite d'ENCRE des lettres, pas la surface (Old London
+    # a beaucoup de vide au-dessus des glyphes -> sinon le texte tombe trop bas).
+    bb = haut.get_bounding_rect()
+    px = rect.centerx - bb.w // 2 - bb.x
+    py = rect.centery - bb.h // 2 - bb.y
+    surf.blit(ombre, (px + 2, py + 3))
+    surf.blit(haut, (px, py))
 
 
 # ----------------------------------------------------------------------
@@ -1894,7 +1898,7 @@ def menu_difficulte(perso1, perso2):
     H, GAP = 84, 22
     libelles = ["Easy", "Normal", "Hard"]                 # AFFICHE (anglais)
     niveaux = ["facile", "normal", "difficile"]           # cles INTERNES (IA.NIVEAUX) -- ne pas traduire
-    fbtn = Button._police(int(H * 0.56))
+    fbtn = Button._police(int(H * 0.72))
     W = max(fbtn.size(txt)[0] for txt in libelles) + 118
     n = len(libelles)
     PANEL_W = W + 96
@@ -1904,7 +1908,7 @@ def menu_difficulte(perso1, perso2):
     x = SCREEN_WIDTH // 2 - W // 2
     top = panel.top + 46
     btns = [Button(x, top + k * (H + GAP), lib, W, H) for k, lib in enumerate(libelles)]
-    fback = Button._police(int(52 * 0.56))
+    fback = Button._police(int(52 * 0.72))
     wback = fback.size("Back")[0] + 76
     b_back = Button(SCREEN_WIDTH // 2 - wback // 2, panel.bottom - 68, "Back", wback, 52)
     par_dx = par_dy = 0.0
@@ -2146,12 +2150,12 @@ def menu_accueil(fade_in=False, perso1="Kenshi", perso2="Lysandra"):
     # Hierarchie visuelle : "Enter the Battle" = bouton HEROS (grand, texte imposant),
     # Options / Desert = secondaires, plus petits, sur une rangee en dessous.
     _HERO_H, _SEC_H, _gap = 112, 60, 30
-    _fh = police_acier(int(_HERO_H * 0.56))
+    _fh = police_acier(int(_HERO_H * 0.72))
     _hw = _fh.size("Enter the Battle")[0] + 140
     hero_rect = pygame.Rect((SCREEN_WIDTH - _hw) // 2, 696, _hw, _HERO_H)
     boutons_menu = [(hero_rect, "Enter the Battle", BATTLE_MENU)]   # -> sous-menu (Training/Local/LAN)
     _sec = [("Options", "options"), ("Desert...", "quit")]
-    _fs = police_acier(int(_SEC_H * 0.56))
+    _fs = police_acier(int(_SEC_H * 0.72))
     _sw = [_fs.size(txt)[0] + 84 for txt, _ in _sec]
     _sx = (SCREEN_WIDTH - (sum(_sw) + _gap)) // 2
     for (txt, act), w in zip(_sec, _sw):

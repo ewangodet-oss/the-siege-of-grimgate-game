@@ -942,7 +942,7 @@ class Button:
         self.text = text
         # Police calee sur la HAUTEUR (plus le bouton est grand, plus le texte est
         # imposant), puis reduite si le texte deborde en largeur.
-        taille = int(height * 0.56)
+        taille = int(height * 0.72)
         f = Button._police(taille)
         while taille > 16 and f.size(text)[0] > width - 46:
             taille -= 2
@@ -972,9 +972,13 @@ class Button:
         coul = (236, 218, 180) if hover else (214, 202, 176)           # texte grave
         ombre = self.font_menu.render(self.text, True, (26, 22, 16))
         haut = self.font_menu.render(self.text, True, coul)
-        cr = haut.get_rect(center=r.center)
-        surface.blit(ombre, (cr.x + 2, cr.y + 3))
-        surface.blit(haut, cr)
+        # Centrage OPTIQUE : boite d'ENCRE des lettres, pas la surface (Old London
+        # a beaucoup de vide au-dessus des glyphes -> sinon le texte tombe trop bas).
+        bb = haut.get_bounding_rect()
+        px = r.centerx - bb.w // 2 - bb.x
+        py = r.centery - bb.h // 2 - bb.y
+        surface.blit(ombre, (px + 2, py + 3))
+        surface.blit(haut, (px, py))
 
     def check_hover(self, mouse_pos):
         avant = self.is_hovered
