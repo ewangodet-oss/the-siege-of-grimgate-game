@@ -5197,6 +5197,11 @@ def jouer_entrainement(perso):
             _f._block_prev = _f.block
         if shield_mode == "on_hit" and dummy.block:
             dummy.block_age = 0                       # garde FRAICHE a chaque coup -> RENVOIE le spin
+        # Le mannequin EXPOSE la barre du training comme ses VRAIS PV : les kits qui
+        # lisent la vie de la cible (Execution de Kenshi sous 25%...) marchent aussi ici.
+        # (Sans ca il restait a 1 000 000 PV internes -> Execution jamais declenchable.)
+        dummy.max_health = BARRE_MAX
+        dummy.health = max(1.0, hp_aff)
         hp_before = dummy.health
         joueur.update(screen, dummy)                      # peut toucher le mannequin
         degats = hp_before - dummy.health                 # avant que le dummy remette ses PV
