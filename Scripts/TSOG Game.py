@@ -664,6 +664,22 @@ SONS_PERSO["Lysandra"] = {
     "seisme_explosion": _pool_sons(_L + "seisme explosion.ogg", 1),
     "foot_frames":  (2, 6),
 }
+# Grondement + explosion du seisme : PICS deja hauts (81/89%) mais VOLUME PERCU faible
+# (graves, RMS basse) -> la normalisation par pic ne peut rien. On amplifie BRUT avec
+# ecretage (le leger clip ajoute du grain, voulu pour de la roche qui gronde/explose).
+def _amplifier(pool, facteur):
+    if _np is None:
+        return pool
+    out = []
+    for _s in pool:
+        _arr = pygame.sndarray.array(_s).astype(_np.float32)
+        _arr = _np.clip(_arr * facteur, -32768, 32767).astype(_np.int16)
+        out.append(pygame.sndarray.make_sound(_np.ascontiguousarray(_arr)))
+    return out or pool
+
+
+SONS_PERSO["Lysandra"]["seisme_charge"] = _amplifier(SONS_PERSO["Lysandra"]["seisme_charge"], 2.6)
+SONS_PERSO["Lysandra"]["seisme_explosion"] = _amplifier(SONS_PERSO["Lysandra"]["seisme_explosion"], 2.2)
 
 _A = _AUDIO_PERSO + "Arinya/"
 SONS_PERSO["Arinya"] = {
@@ -910,14 +926,14 @@ def detecter_sons_combat(f, o):
         gel = getattr(f, "_seisme_gel", False)
         if gel and not getattr(f, "_snd_gel", False):     # la charge DEMARRE
             _joue(perso.get("voice_attack"), perso.get("gain_voix", GAIN_VOIX))
-            f._canal_seisme = _joue(perso.get("seisme_charge"))
+            f._canal_seisme = _joue(perso.get("seisme_charge"), 1.0)
         if not gel and getattr(f, "_snd_gel", False):     # elle RELACHE
             if getattr(f, "_canal_seisme", None) is not None:
                 f._canal_seisme.fadeout(90)               # coupe le grondement NET
                 f._canal_seisme = None
             _joue(perso.get("voice_attack"), perso.get("gain_voix", GAIN_VOIX))
             if getattr(f, "_seisme_perce", False):        # PLEINE charge -> le sol explose
-                _joue(perso.get("seisme_explosion"))
+                _joue(perso.get("seisme_explosion"), 1.0)
         f._snd_gel = gel
     # ----- Kenshi : FLOW -- gain de stack (aleatoire), plein regime (3e), stack perdu. -----
     fl = getattr(f, "flow", None)
