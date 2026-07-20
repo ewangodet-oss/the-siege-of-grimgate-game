@@ -882,7 +882,9 @@ def detecter_sons_combat(f, o):
             and getattr(f, "action", None) == getattr(f, "actions", {}).get("attack2")
             and not getattr(f, "_snd_sol_ok", False)
             # 1 frame AVANT la frame de degats : c'est la que la lame touche le sol
-            # visuellement (au frame de degats, le son arrivait en retard).
+            # visuellement (au frame de degats, le son arrivait en retard). JAMAIS
+            # pendant le GEL de charge (la lame est en l'air, figee a cette frame !).
+            and not getattr(f, "_seisme_gel", False)
             and getattr(f, "frame_index", 0) >= cfg_f["attacks"][2]["frame"] - 1
             and not getattr(f, "damage_dealt", False)):
         h = perso.get("hit")

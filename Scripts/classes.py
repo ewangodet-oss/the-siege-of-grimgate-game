@@ -1372,8 +1372,10 @@ class Fighter:
         return cd
 
     def perce_garde(self, target):
-        """True si le coup EN COURS ignore le blocage (seisme charge de Lysandra).
-        La parade parfaite, elle, reste toujours au-dessus."""
+        """True si le coup EN COURS ignore TOUTE defense de garde : blocage ET parade
+        parfaite (seisme charge de Lysandra -- telegraphie 1,4 s a l'avance, une parade
+        frame-perfect serait triviale a placer et tuerait le move). Seule l'ESQUIVE
+        reste une reponse."""
         return False
 
     def check_collision(self, surface, target):
@@ -1414,7 +1416,8 @@ class Fighter:
                         # un bouclier" (blocked_hit -> cd d'attaque rallonge), aucun degat/stun.
                         self.damage_dealt = True
                         self.blocked_hit = True
-                    elif target.block and bloque_de_face and parade_parfaite(target):
+                    elif (target.block and bloque_de_face and parade_parfaite(target)
+                          and not self.perce_garde(target)):
                         riposte_parade(self, target)    # PARADE PARFAITE : rien pour la cible
                     elif target.block == True and bloque_de_face and not self.perce_garde(target):
                         # Coup bloque : on encaisse des degats reduits et le
@@ -1631,8 +1634,8 @@ class Lysandra(Fighter):
         return min(self.MULT_CAP, m)
 
     def perce_garde(self, target):
-        # SEISME a pleine charge : l'onde passe A TRAVERS la garde (la parade parfaite,
-        # elle, reste au-dessus : contrepartie frame-perfect toujours possible).
+        # SEISME a pleine charge : l'onde passe a travers TOUT (garde ET parade parfaite,
+        # sinon le move telegraphie serait trivial a contrer). Reponse : l'esquive.
         return self._en_attack2() and getattr(self, "_seisme_perce", False)
 
     def coup_touche(self, target, bloque):
@@ -4899,7 +4902,7 @@ MOVES_GUIDE = {
     ],
     "Lysandra": [
         {"nom": "Seismic Blow", "seq": ["HOLD M2", "RELEASE"],
-         "note": "Freeze the windup to charge (up to x2.2) - fully charged, it smashes THROUGH guard",
+         "note": "Freeze the windup to charge (x2.2 max) - fully charged, NO guard or parry stops it",
          "detect": lambda f, d: d > 0 and getattr(f, "_seisme_conso", 1.0) > 1.05,
          "prog": lambda f: 1 if getattr(f, "_seisme_gel", False) else 0},
         {"nom": "Grinding March", "seq": ["WALK AT FOE", "HIT"],
