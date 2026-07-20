@@ -2577,6 +2577,9 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
     button_apply = Button(SCREEN_WIDTH // 2 - 250, 790, "Apply", 230)     # bas (remontes du bord)
     button_retour = Button(SCREEN_WIDTH // 2 + 20, 790, "Back", 230)
     button_reset_all = Button(90, 802, "Reset settings", 220, 56)         # remise a zero TOTALE : plus petit, centre aligne
+    # Changelog (bas-droit, miroir de Reset settings) : ouvre les notes de version
+    # GitHub dans le navigateur (l'historique complet des maj du jeu).
+    button_changelog = Button(SCREEN_WIDTH - 90 - 220, 802, "Changelog", 220, 56)
     # contenu Display
     button_fs = Button(SCREEN_WIDTH // 2 - 350, 400, "Fullscreen", 330)
     button_win = Button(SCREEN_WIDTH // 2 + 20, 400, "Windowed", 330)
@@ -2760,13 +2763,18 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
             merci = f_cred_cat.render("The Siege of Grimgate  -  thanks for playing !", True, (150, 142, 126))
             screen.blit(merci, merci.get_rect(center=(SCREEN_WIDTH // 2, 312 + len(CREDITS) * 88 + 6)))
 
-        # --- Apply / Back (bas) + Reset settings (bas-gauche) ---
+        # --- Apply / Back (bas) + Reset settings (bas-gauche) + Changelog (bas-droit) ---
         button_apply.check_hover(mouse_pos)
         button_retour.check_hover(mouse_pos)
         button_reset_all.check_hover(mouse_pos)
+        button_changelog.check_hover(mouse_pos)
         button_apply.draw(screen)
         button_retour.draw(screen)
         button_reset_all.draw(screen)
+        button_changelog.draw(screen)
+        if button_changelog.is_clicked(mouse_pos, mouse_clicked):
+            import webbrowser
+            webbrowser.open("https://github.com/%s/releases" % GITHUB_REPO)
         if button_apply.is_clicked(mouse_pos, mouse_clicked):
             if choix_fullscreen != FULLSCREEN_MODE:
                 FULLSCREEN_MODE = choix_fullscreen
