@@ -79,10 +79,127 @@ KEYBINDS = {
 KEYBINDS_DEFAULT = {cote: dict(KEYBINDS[cote]) for cote in KEYBINDS}
 
 
+# ----------------------------------------------------------------------
+#  MANETTES -- OPTIONNELLES. Une manette n'est qu'une SOURCE DE TOUCHES de
+#  plus : on binde un bouton dans Options > Keybinds exactement comme une
+#  touche. Chaque entree manette est encodee dans un espace d'ENTIERS
+#  reserve -> KEYBINDS, settings.json et le reseau restent inchanges (ce
+#  sont toujours des int). RIEN N'EST JAMAIS REQUIS : sans manette branchee
+#  (ou si celle qui etait bindee est debranchee), les lectures renvoient
+#  False et le clavier fonctionne exactement comme avant.
+#    code = MANETTE_BASE + index_manette*10000 + offset, avec offset :
+#      0..999      bouton n
+#      1000..1003  croix directionnelle (haut / bas / gauche / droite)
+#      2000..      axe (axe*2, +0 = negatif, +1 = positif)
+# ----------------------------------------------------------------------
+#  ATTENTION : les keycodes SDL des touches speciales (fleches, Shift...) montent
+#  jusqu'a ~1 073 742 100 (1<<30 | scancode) -> la base manette doit etre BIEN
+#  AU-DESSUS, sinon K_LEFT serait pris pour une manette (bug attrape par les tests).
+MANETTE_BASE = 1_200_000_000
+_MAN_PAS = 10_000        # plage de codes reservee a CHAQUE manette
+_MAN_HAT = 1_000         # debut des directions de la croix
+_MAN_AXE = 2_000         # debut des directions d'axe (sticks / gachettes)
+MANETTE_ZONE_MORTE = 0.5  # au-dela = direction tenue (stick au repos ignore)
+
+_MANETTES = {}      # index (0 = Pad1) -> pygame.joystick.Joystick
+_MAN_PAR_ID = {}    # instance_id (des evenements) -> index
+
+
+def code_manette(index, genre, valeur):
+    """Encode une entree manette en ENTIER (stockable tel quel dans KEYBINDS)."""
+    base = MANETTE_BASE + index * _MAN_PAS
+    if genre == "btn":
+        return base + valeur
+    if genre == "hat":
+        return base + _MAN_HAT + valeur
+    return base + _MAN_AXE + valeur
+
+
+def decode_manette(code):
+    """(index, genre, valeur) d'un code MANETTE, ou None si c'est une touche clavier."""
+    if code is None or code < MANETTE_BASE:
+        return None
+    index, reste = divmod(code - MANETTE_BASE, _MAN_PAS)
+    if reste < _MAN_HAT:
+        return (index, "btn", reste)
+    if reste < _MAN_AXE:
+        return (index, "hat", reste - _MAN_HAT)
+    return (index, "axe", reste - _MAN_AXE)
+
+
+def maj_manettes():
+    """(Re)construit la liste des manettes branchees. Appelee a chaque lecture
+    d'inputs : le test 'le nombre a-t-il change ?' est O(1), donc le BRANCHEMENT
+    A CHAUD est gere sans toucher aux (nombreuses) boucles d'evenements du jeu."""
+    try:
+        if not pygame.joystick.get_init():
+            pygame.joystick.init()
+        n = pygame.joystick.get_count()
+    except pygame.error:
+        return
+    if n == len(_MANETTES):
+        return
+    _MANETTES.clear()
+    _MAN_PAR_ID.clear()
+    for i in range(n):
+        try:
+            j = pygame.joystick.Joystick(i)
+            j.init()
+            _MANETTES[i] = j
+            _MAN_PAR_ID[j.get_instance_id()] = i
+        except pygame.error:
+            pass
+
+
+def index_manette(instance_id):
+    """Index (0 = Pad1) d'une manette depuis l'instance_id d'un evenement, ou None."""
+    maj_manettes()
+    return _MAN_PAR_ID.get(instance_id)
+
+
+def manette_pressee(code):
+    """True si l'entree manette 'code' est TENUE en ce moment. Manette absente,
+    debranchee ou bouton hors de portee -> False (jamais d'erreur)."""
+    d = decode_manette(code)
+    if d is None:
+        return False
+    index, genre, valeur = d
+    j = _MANETTES.get(index)
+    if j is None:
+        return False                      # cette manette n'est pas branchee
+    try:
+        if genre == "btn":
+            return valeur < j.get_numbuttons() and bool(j.get_button(valeur))
+        if genre == "hat":
+            if j.get_numhats() <= 0:
+                return False
+            hx, hy = j.get_hat(0)
+            return ((valeur == 0 and hy > 0) or (valeur == 1 and hy < 0)
+                    or (valeur == 2 and hx < 0) or (valeur == 3 and hx > 0))
+        axe, positif = divmod(valeur, 2)
+        if axe >= j.get_numaxes():
+            return False
+        v = j.get_axis(axe)
+        return v > MANETTE_ZONE_MORTE if positif else v < -MANETTE_ZONE_MORTE
+    except pygame.error:
+        return False                      # debranchee en plein match -> silencieux
+
+
 def touche_pressee(key, code):
-    """True si la touche 'code' est enfoncee. code == None -> action NON liee
-    (touche unbind), renvoie toujours False sans planter l'indexation."""
-    return code is not None and bool(key[code])
+    """True si l'entree 'code' est enfoncee -- CLAVIER **ou** MANETTE (meme espace
+    de codes, cf. MANETTE_BASE). code == None -> action NON liee : renvoie False
+    sans planter l'indexation."""
+    if code is None:
+        return False
+    if code >= MANETTE_BASE:
+        return manette_pressee(code)
+    try:
+        # NB : pas de test 'code < len(key)' ! len() vaut 512 mais pygame traduit
+        # en interne les keycodes >= 1<<30 (fleches du joueur 2) -> le test
+        # casserait leurs touches. On protege juste contre un settings corrompu.
+        return bool(key[code])
+    except (IndexError, KeyError, TypeError):
+        return False
 
 
 class Inputs:
@@ -97,7 +214,10 @@ class Inputs:
 
 
 def lire_inputs(side):
-    """Snapshot des inputs d'un cote, lus sur le clavier LOCAL (via KEYBINDS)."""
+    """Snapshot des inputs d'un cote, lus sur les peripheriques LOCAUX : clavier
+    ET/OU manette, selon ce qui est bind dans KEYBINDS (une action = une entree,
+    peu importe le peripherique). Sert aussi de source aux inputs envoyes en LAN."""
+    maj_manettes()                      # gere le branchement a chaud (test O(1))
     key = pygame.key.get_pressed()
     kb = KEYBINDS[side]
     return Inputs(touche_pressee(key, kb["left"]), touche_pressee(key, kb["right"]),

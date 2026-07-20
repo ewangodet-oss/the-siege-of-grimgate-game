@@ -2411,10 +2411,20 @@ def screen_options(choix_fullscreen, background_surface=None):
 
 
 def nom_touche(code):
-    """Nom lisible d'une touche pygame (ex: 'Q', 'Left', ';', '!').
+    """Nom lisible d'une entree : touche clavier ('Q', 'Left', ';') ou MANETTE
+    ('Pad1 B3' = bouton, 'Pad1 D↑' = croix, 'Pad1 A0+' = axe/stick).
     code == None -> action non liee."""
     if code is None:
         return "—"
+    d = classes.decode_manette(code)
+    if d is not None:
+        index, genre, valeur = d
+        if genre == "btn":
+            return "Pad%d B%d" % (index + 1, valeur)
+        if genre == "hat":
+            return "Pad%d D%s" % (index + 1, ("↑", "↓", "←", "→")[valeur % 4])
+        axe, positif = divmod(valeur, 2)
+        return "Pad%d A%d%s" % (index + 1, axe, "+" if positif else "-")
     n = pygame.key.name(code)
     return n.upper() if len(n) == 1 else n.capitalize()
 
@@ -2440,6 +2450,19 @@ def keybinds_menu(background_surface=None):
 
     rebind = None   # (cote, action) en cours de reassignation, ou None
 
+    def _assigner(cible, code):
+        """Lie 'code' (touche clavier OU entree manette) a l'action ciblee. Une
+        entree ne peut servir qu'a UNE action : si elle est deja utilisee
+        ailleurs (meme par l'autre joueur), on delie l'ancienne (-> None)."""
+        cote, action = cible
+        for c in KEYBINDS:
+            for a in KEYBINDS[c]:
+                if KEYBINDS[c][a] == code and (c, a) != (cote, action):
+                    KEYBINDS[c][a] = None
+        KEYBINDS[cote][action] = code
+        sauver_settings()          # persistance immediate
+
+    classes.maj_manettes()         # ouvre les manettes -> leurs evenements arrivent
     while True:
         clock.tick(FPS)
         mouse_pos = pygame.mouse.get_pos()
@@ -2450,19 +2473,32 @@ def keybinds_menu(background_surface=None):
             if event.type == pygame.KEYDOWN:
                 if rebind is not None:
                     if event.key != pygame.K_ESCAPE:   # Echap = annuler la saisie
-                        cote, action = rebind
-                        # Une touche ne peut servir qu'a UNE action : si elle est
-                        # deja utilisee ailleurs (meme par l'autre joueur), on
-                        # delie l'ancienne action (-> None) avant d'assigner.
-                        for c in KEYBINDS:
-                            for a in KEYBINDS[c]:
-                                if KEYBINDS[c][a] == event.key and (c, a) != (cote, action):
-                                    KEYBINDS[c][a] = None
-                        KEYBINDS[cote][action] = event.key
-                        sauver_settings()      # persistance immediate
+                        _assigner(rebind, event.key)
                     rebind = None
                 elif event.key == pygame.K_ESCAPE:
                     return False
+            # MANETTE (optionnelle) : bouton, croix ou stick POUSSE A FOND se bindent
+            # comme une touche. Hors rebind, ces evenements sont simplement ignores.
+            elif rebind is not None and event.type in (pygame.JOYBUTTONDOWN,
+                                                       pygame.JOYHATMOTION,
+                                                       pygame.JOYAXISMOTION):
+                idx = classes.index_manette(getattr(event, "instance_id",
+                                                    getattr(event, "joy", 0)))
+                code = None
+                if idx is not None:
+                    if event.type == pygame.JOYBUTTONDOWN:
+                        code = classes.code_manette(idx, "btn", event.button)
+                    elif event.type == pygame.JOYHATMOTION:
+                        hx, hy = event.value
+                        d = 0 if hy > 0 else 1 if hy < 0 else 2 if hx < 0 else 3 if hx > 0 else None
+                        if d is not None:
+                            code = classes.code_manette(idx, "hat", d)
+                    elif abs(event.value) > 0.7:       # pousse VOLONTAIREMENT (pas un drift)
+                        code = classes.code_manette(idx, "axe",
+                                                    event.axis * 2 + (1 if event.value > 0 else 0))
+                if code is not None:
+                    _assigner(rebind, code)
+                    rebind = None
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mouse_clicked = True
 
@@ -2476,7 +2512,7 @@ def keybinds_menu(background_surface=None):
         screen.blit(overlay, (0, 0))
 
         titre_parchemin(screen, "Keybinds", font_title, (SCREEN_WIDTH // 2, 90))
-        hint = "Click an action, then press the new key  (Esc to cancel)"
+        hint = "Click an action, then press a key or a gamepad button  (Esc to cancel)"
         h = font_hint.render(hint, True, GRAY)
         screen.blit(h, h.get_rect(center=(SCREEN_WIDTH // 2, 165)))
 

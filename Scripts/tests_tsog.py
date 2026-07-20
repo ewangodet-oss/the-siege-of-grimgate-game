@@ -1208,6 +1208,65 @@ def t_ia_kits_kenshi_lysandra():
     assert ok, "l'IA Kenshi doit DODGE-CANCEL quand un coup part pendant son attaque"
 
 
+@test("Manette : bindable comme une touche, JAMAIS requise (clavier intact sans manette)")
+def t_manette():
+    # 1) ENCODAGE : aller-retour exact, et un code manette reste un ENTIER
+    #    (donc stockable tel quel dans KEYBINDS / settings.json / le reseau).
+    for index, genre, valeur in ((0, "btn", 0), (0, "btn", 3), (1, "btn", 11),
+                                 (0, "hat", 0), (0, "hat", 3), (2, "hat", 1),
+                                 (0, "axe", 0), (0, "axe", 5), (3, "axe", 9)):
+        code = classes.code_manette(index, genre, valeur)
+        assert isinstance(code, int), "un binding manette doit rester un int"
+        assert code >= classes.MANETTE_BASE, "hors de l'espace reserve aux manettes"
+        assert classes.decode_manette(code) == (index, genre, valeur), \
+            "aller-retour KO pour %s" % ((index, genre, valeur),)
+
+    # 2) SEPARATION DES ESPACES : aucune touche clavier n'est prise pour une manette.
+    #    Les touches SPECIALES (fleches, Shift...) ont des keycodes SDL enormes
+    #    (~1 073 742 000) -> c'est le piege que la base manette doit eviter.
+    toutes = [getattr(pygame, n) for n in dir(pygame)
+              if n.startswith("K_") and isinstance(getattr(pygame, n), int)]
+    for k in toutes:
+        assert classes.decode_manette(k) is None, \
+            "la touche clavier %d est lue comme une MANETTE (base trop basse !)" % k
+    assert classes.decode_manette(None) is None, "None (non liee) n'est pas une manette"
+
+    # 2bis) les touches par defaut (dont les FLECHES du joueur 2) restent lisibles
+    faux = pygame.key.get_pressed()
+    for cote in classes.KEYBINDS:
+        for action, code in classes.KEYBINDS_DEFAULT[cote].items():
+            assert classes.touche_pressee(faux, code) is False, \
+                "%s/%s (code %s) doit se lire sans erreur" % (cote, action, code)
+
+    # 3) JAMAIS REQUISE : sans manette branchee, un binding manette renvoie False
+    #    (aucune exception) et le CLAVIER continue de marcher exactement pareil.
+    key = [False] * 512
+    key[pygame.K_q] = True
+    assert classes.touche_pressee(key, pygame.K_q) is True, "clavier : touche tenue"
+    assert classes.touche_pressee(key, pygame.K_d) is False, "clavier : touche relachee"
+    assert classes.touche_pressee(key, None) is False, "action non liee"
+    for genre, valeur in (("btn", 0), ("hat", 2), ("axe", 1)):
+        code = classes.code_manette(0, genre, valeur)
+        assert classes.touche_pressee(key, code) is False, \
+            "sans manette branchee, %s doit etre False (et ne pas planter)" % genre
+    assert classes.manette_pressee(classes.code_manette(7, "btn", 2)) is False, \
+        "manette absente (index 7) -> False"
+
+    # 4) ROBUSTESSE : un code clavier aberrant (settings corrompu) ne fait pas planter
+    assert classes.touche_pressee(key, 999999) is False, "code hors bornes -> False"
+
+    # 5) INTEGRATION : une action bindee sur MANETTE ne casse pas lire_inputs
+    #    (elle est juste inactive tant qu'aucune manette n'est branchee).
+    sauv = dict(classes.KEYBINDS["Left"])
+    try:
+        classes.KEYBINDS["Left"]["move1"] = classes.code_manette(0, "btn", 0)
+        inp = classes.lire_inputs("Left")
+        assert isinstance(inp, classes.Inputs) and inp.move1 is False, \
+            "binding manette sans manette -> action inactive, pas de crash"
+    finally:
+        classes.KEYBINDS["Left"] = sauv
+
+
 # ---------------------------------------------------------------- runner
 def main():
     import time
