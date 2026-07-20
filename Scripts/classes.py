@@ -329,9 +329,11 @@ class IA:
         # face aux rapides) : a mi-distance seulement, avec parcimonie, charge courte en
         # general et PLEINE (perce-garde) 3 fois sur 10 pour punir les turtles.
         if cfg and cfg.get("seisme") and getattr(moi, "attack_cd", 0) == 0 \
-                and not getattr(moi, "attacking", False) and 260 < dd < 430:
+                and not getattr(moi, "attacking", False) and 190 < dd < 360:
+            # Plus PRES qu'avant (260-430 : la cible sortait de portee pendant le gel et
+            # AUCUN seisme charge ne touchait) + charge courte par defaut (moins previsible).
             self._special_cd = 110
-            n = 52 if self.rng.random() < 0.3 else 26
+            n = 52 if self.rng.random() < 0.3 else 22
             return self._enfiler([{"move2": True}] * n + [{}])
         return None
 
@@ -382,6 +384,13 @@ class IA:
         # normale tenait le bouton, on relache IMMEDIATEMENT (charge quasi nulle).
         if getattr(moi, "_seisme_gel", False):
             return i
+        # === 0b) KENSHI : DODGE-CANCEL defensif -- l'adversaire lance un coup pendant que
+        # KENSHI attaque -> il COUPE sa propre attaque en esquive (si le cancel est recharge).
+        if (getattr(moi, "attacking", False) and debut_att_adv
+                and ((getattr(moi, "config", None) or {}).get("esquive") or {}).get("cancel_cd")
+                and getattr(moi, "cancel_cd", 0) == 0 and getattr(moi, "dodge_cd", 0) == 0
+                and self.rng.random() < 0.8):
+            return Inputs(up=True)
         # === 0b) SLAM Barrion : un saut-attaque est en vol -> on peut ECRASER (move2 en l'air). ===
         if getattr(moi, "jumping_attack", False) and not getattr(moi, "hit_down", False):
             return Inputs(move2=True) if self.rng.random() < 0.30 else i

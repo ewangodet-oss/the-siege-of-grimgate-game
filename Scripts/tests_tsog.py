@@ -1150,6 +1150,64 @@ def t_lysandra_kit():
     l._seisme_mult = 1.0; l._seisme_perce = False; l.poids = 0
 
 
+@test("IA solo : les NOUVEAUX kits sont utilises (Kenshi traversee/buff/flow/cancel, Lysandra seisme/marche/fracasse)")
+def t_ia_kits_kenshi_lysandra():
+    def sim(Cl, adv_cls, g, frames, adv_bloque=False):
+        a = perso(Cl, 400); a.flip = False
+        b = perso(adv_cls, 760, flip=True)
+        ia1 = classes.IA("difficile", graine=g); ia2 = classes.IA("difficile", graine=g + 3)
+        classes.reset_horloge(); classes.reset_horloge_active()
+        st = dict(trav=0, buff=0, flow=0, gel=0, seisme=0, poids=0, frac=0)
+        for _ in range(frames):
+            classes.avancer_horloge(); classes.avancer_horloge_active()
+            a.inputs = ia1.decide(a, b)
+            b.inputs = classes.Inputs(block=True) if adv_bloque else ia2.decide(b, a)
+            a.mvmt(SURF, b); b.mvmt(SURF, a)
+            a.update(SURF, b); b.update(SURF, a)
+            st["trav"] += 1 if getattr(a, "_dodge_trav", False) else 0
+            st["buff"] += 1 if getattr(a, "_lame_atk", 0) > 0 else 0
+            st["flow"] = max(st["flow"], getattr(a, "flow", 0))
+            st["gel"] += 1 if getattr(a, "_seisme_gel", False) else 0
+            if getattr(a, "_seisme_conso", 1.0) > 1.05:
+                st["seisme"] += 1
+                a._seisme_conso = 1.0
+            st["poids"] = max(st["poids"], getattr(a, "poids", 0))
+            st["frac"] = getattr(a, "_nb_fracasse", 0)
+            if not a.alive or not b.alive:                 # on mesure l'USAGE, pas le score
+                a.health = a.max_health; b.health = b.max_health
+        return st
+
+    k = sim(classes.Kenshi, classes.Barrion, 7, 2700)
+    assert k["trav"] > 0, "l'IA Kenshi doit TRAVERSER (dash passe-lame)"
+    assert k["buff"] > 0, "l'IA Kenshi doit lancer des attaques BUFFEES (lame affutee)"
+    assert k["flow"] >= 2, "l'IA Kenshi doit monter son FLOW (recu %d)" % k["flow"]
+
+    l = sim(classes.Lysandra, classes.KonradForgeval, 7, 2700)
+    assert l["gel"] > 0, "l'IA Lysandra doit CHARGER le seisme"
+    assert l["seisme"] >= 1, "au moins un seisme CHARGE doit toucher"
+    assert l["poids"] >= 8, "l'IA Lysandra doit charger sa MARCHE (recu %d)" % l["poids"]
+
+    lb = sim(classes.Lysandra, classes.Stormr, 7, 2700, adv_bloque=True)
+    assert lb["frac"] >= 1, "l'IA Lysandra doit FRACASSER une garde tenue"
+
+    # DODGE-CANCEL : declencheur direct -- l'adversaire lance un coup PENDANT l'attaque
+    # de Kenshi ; sur 8 graines, au moins une IA doit repondre par le cancel (proba 0.8).
+    ok = False
+    for g in range(1, 9):
+        ia = classes.IA("difficile", graine=g)
+        kn = perso(classes.Kenshi, 700)
+        ad = perso(classes.Barrion, 830, flip=True)
+        kn.attacking = True; kn.attack_type = 1
+        kn.cancel_cd = 0; kn.dodge_cd = 0; kn.dodging = False
+        ad.attacking = False
+        ia.decide(kn, ad)                          # frame 1 : rien
+        ad.attacking = True                        # frame 2 : le coup adverse PART (front)
+        if ia.decide(kn, ad).up:
+            ok = True
+            break
+    assert ok, "l'IA Kenshi doit DODGE-CANCEL quand un coup part pendant son attaque"
+
+
 # ---------------------------------------------------------------- runner
 def main():
     import time
