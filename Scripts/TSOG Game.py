@@ -970,7 +970,10 @@ def detecter_sons_combat(f, o):
         po = SONS_PERSO.get(getattr(o, "_nom", None))
         if po and getattr(o, "attacking", False):
             h = po.get("hit")
-            if isinstance(h, dict):   # par arme / par coup
+            if getattr(o, "_snd_sol_ok", False):
+                pass                  # Lysandra M2 : l'impact au SOL a deja sonne (1 frame
+                                      # avant) -> ne pas rejouer le meme sample (doublon)
+            elif isinstance(h, dict):   # par arme / par coup
                 _joue(h.get(_cle_attaque(o)))
             else:                     # Stormr : pool simple (epee electrique)
                 _joue(h)
