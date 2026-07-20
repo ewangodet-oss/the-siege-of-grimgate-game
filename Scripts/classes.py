@@ -788,6 +788,12 @@ def bouclier_tick(f):
         f.block_health = 0
         f.block_cd = 120
         f.hit = True                       # garde brisee -> sonne
+        if getattr(f, "_stun_lourd", False):
+            # FRACASSE-GARDE (Lysandra) : une garde brisee par ELLE sonne PLUS
+            # LONGTEMPS (pas d'attaque ~1,5 s) et la garde revient plus tard.
+            f._stun_lourd = False
+            f.attack_cd = max(getattr(f, "attack_cd", 0), 45)
+            f.block_cd = 160
 
 
 # ======================================================================
@@ -1341,7 +1347,7 @@ class Fighter:
                     self.hit = False
                     self._grace = temps_actif_ms() + GRACE_MS   # anti stun-lock
                     self.attacking = False
-                    self.attack_cd = 15
+                    self.attack_cd = max(15, self.attack_cd)   # garde le stun RALLONGE (fracasse-garde)
 
     def update_action(self, new_action):
         """Change l'action et réinitialise l'animation"""
@@ -1376,6 +1382,11 @@ class Fighter:
         parfaite (seisme charge de Lysandra -- telegraphie 1,4 s a l'avance, une parade
         frame-perfect serait triviale a placer et tuerait le move). Seule l'ESQUIVE
         reste une reponse."""
+        return False
+
+    def fracasse_garde(self):
+        """True si ce perso BRISE les gardes en lourd (Lysandra) : une garde qu'il
+        casse sonne la victime plus longtemps (marquage _stun_lourd -> bouclier_tick)."""
         return False
 
     def check_collision(self, surface, target):
@@ -1425,6 +1436,9 @@ class Fighter:
                         # l'anim de hit ne se joue pas et le bouclier reste affiche.
                         target.health -= damage*BLOC_CHIP
                         target.block_health += block_dmg*0.9
+                        if target.block_health >= BOUCLIER_MAX and self.fracasse_garde():
+                            target._stun_lourd = True      # casse LOURDE -> stun rallonge
+                            self._nb_fracasse = getattr(self, "_nb_fracasse", 0) + 1
                         self.damage_dealt = True
                         self.blocked_hit = True
                         self.coup_touche(target, True)
@@ -1545,10 +1559,12 @@ class Lysandra(Fighter):
         "attacks": {
             # Equilibrage 2026-07 : atk1 25->22. Lysandra a les PV les + hauts du jeu (500) et
             # aucun outil -> son burst d'ouverture n'a pas a etre le + gros en plus (modele dps~15).
-            1: {"frame": 3, "damage": 22, "block_dmg": 22,
+            # FRACASSE-GARDE : block_dmg dopes (32*0.9=28.8 -> 2 coups cassent une garde
+            # neuve de 55) : bloquer Lysandra est un pari perdant, il faut parer/esquiver.
+            1: {"frame": 3, "damage": 22, "block_dmg": 32,
                 "hitboxes_right": [(0, 0, 220, None), (-138, -80, 358, 80)],
                 "hitboxes_left":  [(-220, 0, 220, None), (-220, -80, 358, 80)]},
-            2: {"frame": 3, "damage": 17, "block_dmg": 17,
+            2: {"frame": 3, "damage": 17, "block_dmg": 25,
                 "hitboxes_right": [(0, 0, 470, None), (-138, -170, 608, 170)],
                 "hitboxes_left":  [(-470, 0, 470, None), (-470, -170, 608, 170)]},
         },
@@ -1637,6 +1653,9 @@ class Lysandra(Fighter):
         # SEISME a pleine charge : l'onde passe a travers TOUT (garde ET parade parfaite,
         # sinon le move telegraphie serait trivial a contrer). Reponse : l'esquive.
         return self._en_attack2() and getattr(self, "_seisme_perce", False)
+
+    def fracasse_garde(self):
+        return True                        # ses casses de garde sonnent PLUS LONGTEMPS
 
     def coup_touche(self, target, bloque):
         self._marche_conso = getattr(self, "poids", 0) / self.POIDS_MAX_F   # pour le guide
@@ -2114,7 +2133,7 @@ class KonradForgeval:
                     self.hit = False
                     self._grace = temps_actif_ms() + GRACE_MS   # anti stun-lock
                     self.attacking = False
-                    self.attack_cd = 15
+                    self.attack_cd = max(15, self.attack_cd)   # garde le stun RALLONGE (fracasse-garde)
 
     def update_action(self, new_action):
         """Change l'action et reinitialise l'animation."""
@@ -2742,7 +2761,7 @@ class Arinya:
                     self.hit = False
                     self._grace = temps_actif_ms() + GRACE_MS   # anti stun-lock
                     self.attacking = False
-                    self.attack_cd = 15
+                    self.attack_cd = max(15, self.attack_cd)   # garde le stun RALLONGE (fracasse-garde)
 
     def update_action(self, new_action):
         if new_action != self.action:
@@ -4245,7 +4264,7 @@ class Fighter2(Fighter):
                 self.hit = False
                 self._grace = temps_actif_ms() + GRACE_MS   # anti stun-lock
                 self.attacking = False
-                self.attack_cd = 15
+                self.attack_cd = max(15, self.attack_cd)    # garde le stun RALLONGE (fracasse-garde)
 
     def _spin_update(self, target):
         """Toupie : INTRO (preparation) + MILIEU qui BOUCLE 'loops' fois + OUTRO (arret), l'intro
@@ -4870,6 +4889,13 @@ def _d_ancrage(f, degats):
     return cur > prev
 
 
+def _d_fracasse(f, degats):
+    prev = getattr(f, "_gd_frac", 0)
+    cur = getattr(f, "_nb_fracasse", 0)
+    f._gd_frac = cur
+    return cur > prev
+
+
 _M_ESQUIVE = {"nom": "Dodge", "seq": ["UP"],
               "note": "Invulnerable hop, always away from the enemy",
               "detect": lambda f, d: _front(f, "dodging", "_gd_dodge"),
@@ -4915,6 +4941,9 @@ MOVES_GUIDE = {
         {"nom": "Anchored", "seq": ["BLOCK"],
          "note": "Blocking or charging, she cannot be pushed an inch",
          "detect": _d_ancrage},
+        {"nom": "Shieldbreaker", "seq": ["M1 / M2", "ON GUARD"],
+         "note": "Two blows crack a fresh shield - a guard SHE breaks stuns far longer",
+         "detect": _d_fracasse},
         {"nom": "Slow Wrath", "seq": ["UNDER 60% HP"],
          "note": "The more she bleeds, the harder she hits (up to +35%)",
          "detect": lambda f, d: d > 0 and getattr(f, "_colere_active", False)},

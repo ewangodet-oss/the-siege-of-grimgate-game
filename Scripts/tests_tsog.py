@@ -71,6 +71,7 @@ _RESET = dict(attacking=False, attack_cd=0, hit=False, block=False, block_cd=0,
               _seisme_mult=1.0, _seisme_perce=False, _seisme_lache=False,
               _seisme_conso=1.0, _marche_conso=0.0, _colere_active=False,
               _armure_abs=False, _ancrage_nb=0, _gd_armure=False, _gd_ancr=0,
+              _stun_lourd=False, _nb_fracasse=0, _gd_frac=0,
               # dummy
               mourant=False, respawn_timer=0)
 _CACHE = {}
@@ -1115,6 +1116,23 @@ def t_lysandra_kit():
     assert abs(l._seisme_mult - 2.2) < 0.06 and l.perce_garde(loin), \
         "pleine charge : x2.2 + PERCE la garde (mult %.2f)" % l._seisme_mult
     l.attacking = False; l._seisme_mult = 1.0; l._seisme_perce = False
+
+    # 4bis) FRACASSE-GARDE : ses casses sonnent PLUS LONGTEMPS (marquage + bouclier_tick)
+    assert l.fracasse_garde() and not perso(classes.Kenshi).fracasse_garde(), \
+        "seule Lysandra fracasse les gardes"
+    assert l.config["attacks"][1]["block_dmg"] >= 30, "degats de bouclier dopes"
+    v = perso(classes.Stormr, 1100)                # victime marquee par une casse lourde
+    v.block_health = classes.BOUCLIER_MAX + 1
+    v._stun_lourd = True; v.attack_cd = 0; v._block_prev = True
+    classes.bouclier_tick(v)
+    assert v.hit and v.attack_cd >= 45 and v.block_cd == 160, \
+        "casse LOURDE : stun rallonge (atk_cd>=45, block_cd=160)"
+    v.hit = False
+    v.block_health = classes.BOUCLIER_MAX + 1      # casse NORMALE (pas de marquage)
+    v.attack_cd = 0
+    classes.bouclier_tick(v)
+    assert v.hit and v.attack_cd == 0 and v.block_cd == 120, "casse normale inchangee"
+    v.hit = False; v.block_cd = 0
 
     # 5) COLERE LENTE : x1 a pleine vie, +35% au plancher (20% PV)
     l.poids = 0; l.attack_type = 1
