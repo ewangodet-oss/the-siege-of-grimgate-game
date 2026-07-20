@@ -701,6 +701,9 @@ SONS_PERSO["Kenshi"] = {
     # son du swing decale a la frame du SLASH (1-indexed) au lieu du debut de l'attaque
     # (les coups de Kenshi ont un windup ; impact a la frame 5). A ajuster au besoin.
     "swing_frame":  {1: 5, 2: 5},
+    # TRAVERSEE (passe-lame) : whoosh de lame au depart du dash (reutilise ses swings,
+    # pool pitche -> ne sonne pas comme une attaque).
+    "dash": _pool_sons([_KE + "attack swing 1.ogg", _KE + "attack swing 2.ogg"], 3),
 }
 # Les swings de Kenshi sont enregistres tres bas -> on les normalise au niveau des autres.
 for _w in (1, 2):
@@ -1098,10 +1101,11 @@ def detecter_sons_combat(f, o):
         if hs and not f._snd_has_spear:                   # ramassage
             _joue(perso.get("spear_pickup"))
         f._snd_has_spear = hs
-        dsh = getattr(f, "dashing", False)
-        if dsh and not f._snd_dashing:
-            _joue(perso.get("dash"))
-        f._snd_dashing = dsh
+    # ----- Dash : son au DEPART (generique : double-tap d'Arinya, TRAVERSEE de Kenshi) -----
+    dsh = getattr(f, "dashing", False)
+    if dsh and not getattr(f, "_snd_dashing", False) and perso:
+        _joue(perso.get("dash"))
+    f._snd_dashing = dsh
     # ----- Pas : synchro sur les frames de contact des pieds de l'anim de COURSE -----
     fr = getattr(f, "frame_index", -1)
     run_acts = set()                               # plusieurs actions de course possibles
