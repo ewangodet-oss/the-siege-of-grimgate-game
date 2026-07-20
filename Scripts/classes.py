@@ -1646,6 +1646,7 @@ class Lysandra(Fighter):
                 self._seisme_lache = True         # plus de re-gel sur CETTE attaque
         else:
             self._seisme_arme = False
+            self._seisme_gel = False       # securite : pas de gel orphelin (mort en pleine charge...)
         super().update(surface, target)
 
     def mult_degats(self, target):

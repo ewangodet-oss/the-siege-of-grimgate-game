@@ -659,6 +659,9 @@ SONS_PERSO["Lysandra"] = {
     "death":        _pool_sons(_L + "death.ogg", 2),
     "jump":         _pool_sons(_L + "jump.ogg", 2),
     "footstep":     _pool_sons([_L + "step 1.ogg", _L + "step 2.ogg", _L + "step 3.ogg"], 2),
+    # SEISME : grondement pendant le gel (coupe a la relache) + explosion a PLEINE charge.
+    "seisme_charge":    _pool_sons(_L + "seisme charge.ogg", 1),
+    "seisme_explosion": _pool_sons(_L + "seisme explosion.ogg", 1),
     "foot_frames":  (2, 6),
 }
 
@@ -704,6 +707,12 @@ SONS_PERSO["Kenshi"] = {
     # TRAVERSEE (passe-lame) : whoosh de lame au depart du dash (reutilise ses swings,
     # pool pitche -> ne sonne pas comme une attaque).
     "dash": _pool_sons([_KE + "attack swing 1.ogg", _KE + "attack swing 2.ogg"], 3),
+    # FLOW : gain de stack (1-2, aleatoire), plein regime (3e stack), stack perdu (aleatoire).
+    "flow_stack": _pool_sons([_KE + "flow stack 1.ogg", _KE + "flow stack 2.ogg"], 2),
+    "flow_max":   _pool_sons(_KE + "flow stack max.ogg", 1),
+    "flow_lose":  _pool_sons([_KE + "stack lose 1.ogg", _KE + "stack lose 2.ogg"], 2),
+    # PASSE-LAME : slice de backstab joue SIMULTANEMENT au weapon hit (meme frame).
+    "backstab":   _pool_sons(_KE + "kenshi backstab.ogg", 2),
 }
 # Les swings de Kenshi sont enregistres tres bas -> on les normalise au niveau des autres.
 for _w in (1, 2):
@@ -895,6 +904,30 @@ def detecter_sons_combat(f, o):
         f._snd_sol_ok = True
     if not atk:
         f._snd_sol_ok = False
+    # ----- Lysandra : CHARGE SISMIQUE -- voix + grondement au DEBUT du gel, coupes a la
+    # RELACHE (+ voix), et EXPLOSION uniquement a PLEINE puissance (meme dans le vide). -----
+    if perso and cfg_f and cfg_f.get("seisme"):
+        gel = getattr(f, "_seisme_gel", False)
+        if gel and not getattr(f, "_snd_gel", False):     # la charge DEMARRE
+            _joue(perso.get("voice_attack"), perso.get("gain_voix", GAIN_VOIX))
+            f._canal_seisme = _joue(perso.get("seisme_charge"))
+        if not gel and getattr(f, "_snd_gel", False):     # elle RELACHE
+            if getattr(f, "_canal_seisme", None) is not None:
+                f._canal_seisme.fadeout(90)               # coupe le grondement NET
+                f._canal_seisme = None
+            _joue(perso.get("voice_attack"), perso.get("gain_voix", GAIN_VOIX))
+            if getattr(f, "_seisme_perce", False):        # PLEINE charge -> le sol explose
+                _joue(perso.get("seisme_explosion"))
+        f._snd_gel = gel
+    # ----- Kenshi : FLOW -- gain de stack (aleatoire), plein regime (3e), stack perdu. -----
+    fl = getattr(f, "flow", None)
+    if fl is not None and perso and perso.get("flow_stack"):
+        prev_fl = getattr(f, "_snd_flow", 0)
+        if fl > prev_fl:
+            _joue(perso.get("flow_max") if fl >= Kenshi.FLOW_MAX else perso.get("flow_stack"))
+        elif fl < prev_fl:
+            _joue(perso.get("flow_lose"))
+        f._snd_flow = fl
     # ----- Changement d'arme (Konrad) : 'choose' -----
     wpn = getattr(f, "current_weapon", None)
     if wpn is not None and wpn != f._snd_wpn:
@@ -925,6 +958,8 @@ def detecter_sons_combat(f, o):
                 _joue(h.get(_cle_attaque(o)))
             else:                     # Stormr : pool simple (epee electrique)
                 _joue(h)
+            if getattr(o, "_lame_derniere", 0) == 2:      # PASSE-LAME (Kenshi) : slice de
+                _joue(po.get("backstab"))                 # backstab SIMULTANE au hit
         if po and (getattr(o, "spinning", False) or getattr(o, "jumping_attack", False)):
             _joue(po.get("spin_hit"))  # impact DEDIE des coups du spin/jump (Barrion)
         if amorti:
