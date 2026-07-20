@@ -881,7 +881,9 @@ def detecter_sons_combat(f, o):
     if (atk and perso and cfg_f and cfg_f.get("seisme")
             and getattr(f, "action", None) == getattr(f, "actions", {}).get("attack2")
             and not getattr(f, "_snd_sol_ok", False)
-            and (getattr(f, "frame_index", 0) + 1) > cfg_f["attacks"][2]["frame"]
+            # 1 frame AVANT la frame de degats : c'est la que la lame touche le sol
+            # visuellement (au frame de degats, le son arrivait en retard).
+            and getattr(f, "frame_index", 0) >= cfg_f["attacks"][2]["frame"] - 1
             and not getattr(f, "damage_dealt", False)):
         h = perso.get("hit")
         _joue(h.get(2) if isinstance(h, dict) else h)
