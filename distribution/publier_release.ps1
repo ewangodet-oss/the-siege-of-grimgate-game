@@ -35,7 +35,7 @@ New-Item -ItemType Directory -Force $staging | Out-Null
 
 Write-Host 'Copie du jeu (Scripts + assets + lanceur)...'
 robocopy (Join-Path $repoDir 'Scripts') (Join-Path $staging 'Scripts') /E /NFL /NDL /NJH /NJS `
-    /XF settings.json .mp_firewall_skip /XD __pycache__ | Out-Null
+    /XF settings.json save.json .mp_firewall_skip /XD __pycache__ .cache | Out-Null
 robocopy (Join-Path $repoDir 'assets') (Join-Path $staging 'assets') /E /NFL /NDL /NJH /NJS | Out-Null
 foreach ($f in 'Jouer TSOG.bat', 'README.md', 'LICENSE') {
     $p = Join-Path $repoDir $f

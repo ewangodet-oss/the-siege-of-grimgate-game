@@ -1255,6 +1255,25 @@ def t_manette():
     # 4) ROBUSTESSE : un code clavier aberrant (settings corrompu) ne fait pas planter
     assert classes.touche_pressee(key, 999999) is False, "code hors bornes -> False"
 
+    # 4bis) MAPPING SDL : parsing des cibles physiques + semantique par axe/bouton.
+    assert classes._phys_binding("b0") == ("btn", 0)
+    assert classes._phys_binding("a2") == ("axe", 2)
+    assert classes._phys_binding("+a4") == ("axe", 4), "prefixe +/- (demi-axe) doit etre ignore"
+    assert classes._phys_binding("h0.1") == ("hat", 0)
+    assert classes._phys_binding("") is None and classes._phys_binding("z9") is None
+    # semantique injectee (simule le mapping d'une 360 : a2/a3=RS, a4=LT, a5=RT)
+    classes._MAN_SEM[0] = {"btn": {0: "a", 4: "leftshoulder"},
+                           "axe": {2: "rightx", 4: "lefttrigger", 5: "righttrigger"}}
+    try:
+        assert classes.manette_sem_btn(0, 0) == "a"
+        assert classes.manette_sem_btn(0, 4) == "leftshoulder"
+        assert classes.manette_sem_axe(0, 2) == "rightx", "axe 2 = STICK DROIT (pas LT !)"
+        assert classes.manette_sem_axe(0, 4) == "lefttrigger", "axe 4 = LT (pas un stick !)"
+        assert classes.manette_sem_axe(0, 5) == "righttrigger"
+        assert classes.manette_sem_axe(0, 99) is None, "axe inconnu -> None (fallback)"
+    finally:
+        classes._MAN_SEM.pop(0, None)
+
     # 5) INTEGRATION : une action bindee sur MANETTE ne casse pas lire_inputs
     #    (elle est juste inactive tant qu'aucune manette n'est branchee).
     sauv = dict(classes.KEYBINDS["Left"])

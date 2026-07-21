@@ -181,6 +181,8 @@ cython_debug/
 .cursorindexingignore
 python_portable/
 settings.json
+save.json
+Scripts/.cache/
 *.lnk
 .mp_firewall_skip
 distribution/out/

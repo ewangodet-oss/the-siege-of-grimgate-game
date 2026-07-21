@@ -103,6 +103,95 @@ MANETTE_ZONE_MORTE = 0.5  # au-dela = direction tenue (stick au repos ignore)
 
 _MANETTES = {}      # index (0 = Pad1) -> pygame.joystick.Joystick
 _MAN_PAR_ID = {}    # instance_id (des evenements) -> index
+_MAN_SEM = {}       # index -> {"btn": {n: 'a'/'leftshoulder'/...}, "axe": {n: 'leftx'/'lefttrigger'/...}}
+
+# Semantiques qu'on sait nommer (issues du mapping SDL GameController).
+_SEM_BTN_OK = frozenset(("a", "b", "x", "y", "leftshoulder", "rightshoulder",
+                         "back", "start", "guide", "leftstick", "rightstick"))
+_SEM_AXE_OK = frozenset(("leftx", "lefty", "rightx", "righty",
+                         "lefttrigger", "righttrigger"))
+
+
+def _phys_binding(v):
+    """Parse une cible physique du mapping SDL ('b0','a2','+a4','h0.1') ->
+    ('btn'|'axe'|'hat', numero) ou None."""
+    v = (v or "").strip().lstrip("+-")
+    if len(v) < 2 or not v[1:].split(".")[0].isdigit():
+        return None
+    t = v[0]
+    num = int(v[1:].split(".")[0])
+    return ("btn", num) if t == "b" else ("axe", num) if t == "a" else \
+           ("hat", num) if t == "h" else None
+
+
+def _construire_semantique(device_index):
+    """Lit le mapping SDL GameController de la manette (LE vrai plan des axes/boutons,
+    quel que soit le modele) et renvoie {'btn':{n:sem}, 'axe':{n:sem}} ; {} si indispo
+    -> on retombe alors sur une table Xbox par defaut cote UI."""
+    try:
+        from pygame._sdl2 import controller as _ctrl
+        _ctrl.init()
+        if not _ctrl.is_controller(device_index):
+            return {}
+        mp = _ctrl.Controller(device_index).get_mapping()   # {sem: 'a2'/'b0'/...}
+    except Exception:
+        return {}
+    btn, axe = {}, {}
+    for sem, phys in (mp or {}).items():
+        p = _phys_binding(phys)
+        if p is None:
+            continue
+        genre, num = p
+        if genre == "btn" and sem in _SEM_BTN_OK:
+            btn[num] = sem
+        elif genre == "axe" and sem in _SEM_AXE_OK:
+            axe[num] = sem
+    return {"btn": btn, "axe": axe}
+
+
+def manette_sem_btn(index, bouton):
+    """Semantique SDL d'un bouton ('a','leftshoulder'...) ou None."""
+    return _MAN_SEM.get(index, {}).get("btn", {}).get(bouton)
+
+
+def manette_sem_axe(index, axe):
+    """Semantique SDL d'un axe ('leftx','lefttrigger'...) ou None."""
+    return _MAN_SEM.get(index, {}).get("axe", {}).get(axe)
+
+
+def _axe_de_sem(index, sem, defaut):
+    """Numero d'axe d'une semantique donnee ('leftx'...) pour la manette 'index',
+    ou 'defaut' si le mapping SDL est indispo (layout brut standard)."""
+    for n, s in _MAN_SEM.get(index, {}).get("axe", {}).items():
+        if s == sem:
+            return n
+    return defaut
+
+
+def manette_curseur_delta():
+    """Deplacement voulu du curseur des MENUS (-1..1, -1..1) depuis le stick GAUCHE et la
+    croix de N'IMPORTE quelle manette branchee. (0,0) si rien. Sert a piloter un curseur
+    virtuel a la manette dans tous les menus (le combat, lui, lit lire_inputs/KEYBINDS)."""
+    maj_manettes()
+    dx = dy = 0.0
+    for idx, j in _MANETTES.items():
+        try:
+            ax = _axe_de_sem(idx, "leftx", 0)
+            ay = _axe_de_sem(idx, "lefty", 1)
+            na = j.get_numaxes()
+            vx = j.get_axis(ax) if ax < na else 0.0
+            vy = j.get_axis(ay) if ay < na else 0.0
+            if abs(vx) > 0.28:
+                dx += vx
+            if abs(vy) > 0.28:
+                dy += vy
+            if j.get_numhats() > 0:
+                hx, hy = j.get_hat(0)
+                dx += hx
+                dy -= hy                    # hat : haut = +1 -> ecran vers le HAUT = dy negatif
+        except pygame.error:
+            pass
+    return (max(-1.0, min(1.0, dx)), max(-1.0, min(1.0, dy)))
 
 
 def code_manette(index, genre, valeur):
@@ -141,20 +230,56 @@ def maj_manettes():
         return
     _MANETTES.clear()
     _MAN_PAR_ID.clear()
+    _MAN_SEM.clear()
     for i in range(n):
         try:
             j = pygame.joystick.Joystick(i)
             j.init()
             _MANETTES[i] = j
             _MAN_PAR_ID[j.get_instance_id()] = i
+            _MAN_SEM[i] = _construire_semantique(i)   # vrai plan des axes/boutons (SDL)
         except pygame.error:
             pass
 
 
 def index_manette(instance_id):
-    """Index (0 = Pad1) d'une manette depuis l'instance_id d'un evenement, ou None."""
+    """Index (0 = Pad1) d'une manette depuis l'instance_id d'un evenement. ROBUSTE :
+    si l'instance_id ne matche aucune manette ouverte (mapping rate, ou vieux pygame qui
+    fournit 'joy' = un simple index), on retombe sur cet index s'il est valide, sinon sur
+    la PREMIERE manette branchee (cas courant : une seule manette). None si aucune."""
     maj_manettes()
-    return _MAN_PAR_ID.get(instance_id)
+    idx = _MAN_PAR_ID.get(instance_id)
+    if idx is not None:
+        return idx
+    if instance_id in _MANETTES:          # vieux pygame : 'joy' = index directement
+        return instance_id
+    if _MANETTES:                         # une seule manette -> pas d'ambiguite
+        return next(iter(_MANETTES))
+    return None
+
+
+def manette_nom(index):
+    """Nom de la manette d'index donne ('' si absente)."""
+    j = _MANETTES.get(index)
+    try:
+        return j.get_name() if j is not None else ""
+    except pygame.error:
+        return ""
+
+
+def manette_est_xbox(index):
+    """True si la manette ressemble a une manette Xbox / XInput (layout standard des
+    boutons et axes) -> on peut lui coller des libelles A/B/X/Y, LB/RB, LT/RT, LS/RS."""
+    n = manette_nom(index).lower()
+    return any(k in n for k in ("xbox", "360", "xinput", "x-input"))
+
+
+def manettes_detectees():
+    """(nombre, nom de la 1re) des manettes vues -- pour l'affichage de diagnostic."""
+    maj_manettes()
+    if not _MANETTES:
+        return (0, "")
+    return (len(_MANETTES), manette_nom(min(_MANETTES)))
 
 
 def manette_pressee(code):

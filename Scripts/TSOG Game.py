@@ -52,6 +52,8 @@ import pygame, json, random, math
 import classes
 import reseau
 import discord_rp
+import discord_login
+import sauvegarde
 from classes import (Button, Lysandra, Kenshi, KonradForgeval, Arinya, Stormr, Oswald, Barrion,
                      TrainingDummy,
                      KEYBINDS, KEYBINDS_DEFAULT, assombrir_nuit, reset_caches_combat,
@@ -72,7 +74,8 @@ DEFAULT_SETTINGS = {"fullscreen": True,
                     "vol_master": 0.8, "vol_music": 0.7, "vol_sfx": 0.9,
                     "vol_perso": 0.9, "vol_ambience": 0.6,
                     "raccourci_ne_plus_demander": False,   # popup raccourcis au lancement
-                    "touches_lan": "Left"}                 # profil de touches du joueur LOCAL en LAN (Left/Right)
+                    "touches_lan": "Left",                 # profil de touches du joueur LOCAL en LAN (Left/Right)
+                    "vitesse_curseur": 0.45}               # vitesse du curseur de menu a la MANETTE (0..1)
 
 
 def charger_settings():
@@ -117,7 +120,7 @@ SETTINGS = charger_settings()
 #parametres de l'ecran
 SCREEN_WIDTH = 1600
 SCREEN_HEIGHT = 900
-VERSION = "beta-1.2.1"        # affichee discretement dans un coin du menu principal
+VERSION = "beta-1.3"          # affichee discretement dans un coin du menu principal
 
 # ---------------------------------------------------------------------------
 #  MISE A JOUR AUTO (passive). Au lancement, un thread interroge GitHub (release
@@ -2351,6 +2354,18 @@ def menu_accueil(fade_in=False, perso1="Kenshi", perso2="Lysandra"):
                 jouer_sfx_click()
                 MAJ_INFO["cache"] = True
 
+        # Encart compte Discord (haut-gauche). Cliquable -> deconnexion / changer de compte.
+        carte_rect = dessiner_carte_compte(screen)
+        if carte_rect is not None and mouse_clicked and carte_rect.collidepoint(mouse_pos):
+            jouer_sfx_click()
+            fond = screen.copy()
+            if confirmer("Log out of Discord?", fond):
+                sauvegarde.deconnecter()
+                if not ecran_login():          # redemande la connexion (ou quitter)
+                    return ("quitter", perso1, perso2)
+                survols = [False] * len(boutons_menu)   # reset survols apres le detour
+                continue                        # on repart sur une frame propre du menu
+
         disperser_si_besoin()
         dessiner_curseur(screen)
         pygame.display.flip()
@@ -2410,23 +2425,183 @@ def screen_options(choix_fullscreen, background_surface=None):
         pygame.display.flip()
 
 
+# Semantique SDL -> libelle affiche (fonctionne pour TOUTE manette reconnue).
+_SEM_BTN = {"a": "A", "b": "B", "x": "X", "y": "Y", "leftshoulder": "LB",
+            "rightshoulder": "RB", "back": "Back", "start": "Start",
+            "guide": "Guide", "leftstick": "LS", "rightstick": "RS"}
+_SEM_AXE = {("leftx", 0): "LS ←", ("leftx", 1): "LS →", ("lefty", 0): "LS ↑", ("lefty", 1): "LS ↓",
+            ("rightx", 0): "RS ←", ("rightx", 1): "RS →", ("righty", 0): "RS ↑", ("righty", 1): "RS ↓",
+            ("lefttrigger", 0): "LT", ("lefttrigger", 1): "LT",
+            ("righttrigger", 0): "RT", ("righttrigger", 1): "RT"}
+_SEM_COUL = {"a": (120, 205, 90), "b": (215, 80, 70), "x": (90, 150, 225), "y": (225, 190, 70)}
+# FILET si le mapping SDL est indispo mais que la manette est Xbox/XInput : layout STANDARD
+# des axes bruts (0/1 = stick GAUCHE, 2/3 = stick DROIT, 4 = LT, 5 = RT) -- CONFIRME via SDL.
+_XBOX_BTN = {0: "A", 1: "B", 2: "X", 3: "Y", 4: "LB", 5: "RB",
+             6: "Back", 7: "Start", 8: "LS", 9: "RS", 10: "Guide"}
+_XBOX_AXE = {(0, 0): "LS ←", (0, 1): "LS →", (1, 0): "LS ↑", (1, 1): "LS ↓",
+             (2, 0): "RS ←", (2, 1): "RS →", (3, 0): "RS ↑", (3, 1): "RS ↓",
+             (4, 0): "LT", (4, 1): "LT", (5, 0): "RT", (5, 1): "RT"}
+_FLECHE = ("↑", "↓", "←", "→")
+
+
 def nom_touche(code):
-    """Nom lisible d'une entree : touche clavier ('Q', 'Left', ';') ou MANETTE
-    ('Pad1 B3' = bouton, 'Pad1 D↑' = croix, 'Pad1 A0+' = axe/stick).
-    code == None -> action non liee."""
+    """Nom lisible d'une entree : touche clavier ('Q', 'Left', ';') ou MANETTE. Le libelle
+    manette vient du VRAI mapping SDL (A/B/X/Y, LB/RB, LT/RT, LS/RS + fleches, correct pour
+    tout modele) ; a defaut, table Xbox standard ; sinon generique (B3, A0+). Prefixe 'P2 '
+    si 2e manette. None -> non liee."""
     if code is None:
         return "—"
     d = classes.decode_manette(code)
     if d is not None:
         index, genre, valeur = d
+        pref = "" if index == 0 else "P%d " % (index + 1)
+        xbox = classes.manette_est_xbox(index)
         if genre == "btn":
-            return "Pad%d B%d" % (index + 1, valeur)
-        if genre == "hat":
-            return "Pad%d D%s" % (index + 1, ("↑", "↓", "←", "→")[valeur % 4])
-        axe, positif = divmod(valeur, 2)
-        return "Pad%d A%d%s" % (index + 1, axe, "+" if positif else "-")
+            sem = classes.manette_sem_btn(index, valeur)
+            lbl = _SEM_BTN.get(sem) or (_XBOX_BTN.get(valeur) if xbox else None) or "B%d" % valeur
+        elif genre == "hat":
+            lbl = "D" + _FLECHE[valeur % 4]
+        else:
+            axe, positif = divmod(valeur, 2)
+            sem = classes.manette_sem_axe(index, axe)
+            lbl = _SEM_AXE.get((sem, positif)) \
+                or (_XBOX_AXE.get((axe, positif)) if xbox else None) \
+                or "A%d%s" % (axe, "+" if positif else "-")
+        return pref + lbl
     n = pygame.key.name(code)
     return n.upper() if len(n) == 1 else n.capitalize()
+
+
+def couleur_bind(code):
+    """Teinte d'un binding : boutons de face colores (A vert, B rouge, X bleu, Y or, via la
+    semantique SDL) -> repere visuel immediat. None sinon (couleur par defaut)."""
+    d = classes.decode_manette(code)
+    if d is not None and d[1] == "btn":
+        return _SEM_COUL.get(classes.manette_sem_btn(d[0], d[2]))
+    return None
+
+
+# ======================================================================
+#  NAVIGATION MANETTE DANS LES MENUS -> le jeu 100%% jouable au pad.
+#  Un CURSEUR VIRTUEL est pilote par le stick gauche / la croix ; A = clic
+#  (valider, et MAINTENU = glisser un slider), B = retour (Echap). On
+#  INTERCEPTE pygame.event.get + pygame.mouse.get_pos UNE fois -> TOUS les
+#  menus a la souris marchent tels quels a la manette, sans les reecrire.
+#  La souris reste utilisable : le dernier peripherique utilise pilote le
+#  curseur (la lanterne). OFF pendant le COMBAT (qui lit lire_inputs/KEYBINDS).
+# ======================================================================
+_GP_CURSEUR = [SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2]
+_GP_MODE = False        # True = la manette pilote le curseur (sinon la souris)
+_GP_NAV = True          # False pendant le combat (pas de clic/Echap parasite)
+_GP_VITESSE = 15        # px/frame du curseur a fond de stick (~30 FPS)
+_orig_event_get = pygame.event.get
+_orig_get_pos = pygame.mouse.get_pos
+
+
+_GP_CAPTURE = False     # True pendant qu'on ATTEND un bouton a BINDER (Keybinds)
+
+
+def gp_nav(actif):
+    """Active/desactive la nav manette des menus (mise OFF pendant le combat)."""
+    global _GP_NAV
+    _GP_NAV = actif
+
+
+def gp_capture(actif):
+    """Mode CAPTURE de bind : pendant qu'on attend un bouton a assigner, on NE traduit PAS
+    A/B en clic/Echap -> A et B (et tout le reste) se bindent proprement, sans re-cliquer la
+    touche ni faire 'retour'. Les evenements manette bruts passent tels quels au menu."""
+    global _GP_CAPTURE
+    _GP_CAPTURE = actif
+
+
+def _mouse_get_pos_gp():
+    """get_pos() = curseur VIRTUEL quand la manette pilote, sinon la vraie souris."""
+    if _GP_MODE:
+        return (int(_GP_CURSEUR[0]), int(_GP_CURSEUR[1]))
+    return _orig_get_pos()
+
+
+def _event_get_gp(*a, **k):
+    """event.get() augmente : deplace le curseur virtuel (stick/croix) et traduit les
+    boutons manette en evenements souris/clavier (A=clic maintenu, B=Echap). Sans manette
+    ou nav OFF -> renvoie les evenements bruts inchanges."""
+    evts = _orig_event_get(*a, **k)
+    global _GP_MODE
+    if not _GP_NAV:
+        return evts
+    if _GP_CAPTURE:                          # on attend un bind -> A/B ne cliquent/reculent PAS
+        return evts                          #   (les JOYBUTTONDOWN bruts vont au menu Keybinds)
+    for e in evts:                          # bouger la souris reprend la main
+        if e.type == pygame.MOUSEMOTION and (e.rel[0] or e.rel[1]):
+            _GP_MODE = False
+            _GP_CURSEUR[0], _GP_CURSEUR[1] = e.pos
+    dx, dy = classes.manette_curseur_delta()
+    if dx or dy:
+        _GP_MODE = True
+        v = 7 + SETTINGS.get("vitesse_curseur", 0.45) * 28    # 7..35 px/frame (reglable dans Options)
+        _GP_CURSEUR[0] = max(0, min(SCREEN_WIDTH - 1, _GP_CURSEUR[0] + dx * v))
+        _GP_CURSEUR[1] = max(0, min(SCREEN_HEIGHT - 1, _GP_CURSEUR[1] + dy * v))
+    extra = []
+    pos = (int(_GP_CURSEUR[0]), int(_GP_CURSEUR[1]))
+    for e in evts:
+        if e.type not in (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP):
+            continue
+        idx = classes.index_manette(getattr(e, "instance_id", getattr(e, "joy", 0)))
+        sem = classes.manette_sem_btn(idx, e.button) if idx is not None else None
+        if sem == "a":                      # A = clic (maintenu -> glisse un slider)
+            _GP_MODE = True
+            t = pygame.MOUSEBUTTONDOWN if e.type == pygame.JOYBUTTONDOWN else pygame.MOUSEBUTTONUP
+            extra.append(pygame.event.Event(t, {"button": 1, "pos": pos}))
+        elif sem == "b" and e.type == pygame.JOYBUTTONDOWN:   # B = retour (Echap)
+            extra.append(pygame.event.Event(pygame.KEYDOWN,
+                                            {"key": pygame.K_ESCAPE, "mod": 0, "unicode": ""}))
+    return evts + extra
+
+
+pygame.event.get = _event_get_gp
+pygame.mouse.get_pos = _mouse_get_pos_gp
+
+
+def capturer_manette(event, axes_centres):
+    """Traduit un evenement MANETTE (bouton/croix/axe) en code bindable (int) ou None.
+    GARDE ANTI-GACHETTE : un AXE ne se binde QUE s'il a d'abord ete vu AU REPOS
+    (|v|<0.3) puis pousse a fond (|v|>0.7). Ainsi les gachettes de la 360 (au repos a
+    -1) et le 'dump' d'etat initial des axes a l'ouverture ne volent plus le binding.
+    'axes_centres' = set partage qui memorise les axes vus au repos."""
+    idx = classes.index_manette(getattr(event, "instance_id", getattr(event, "joy", 0)))
+    if idx is None:
+        return None
+    if event.type == pygame.JOYBUTTONDOWN:
+        return classes.code_manette(idx, "btn", event.button)
+    if event.type == pygame.JOYHATMOTION:
+        hx, hy = event.value
+        d = 0 if hy > 0 else 1 if hy < 0 else 2 if hx < 0 else 3 if hx > 0 else None
+        return classes.code_manette(idx, "hat", d) if d is not None else None
+    if event.type == pygame.JOYAXISMOTION:
+        v = event.value
+        cle = (idx, event.axis)
+        if abs(v) < 0.3:
+            axes_centres.add(cle)                     # repos observe -> devient bindable
+        elif abs(v) > 0.7 and cle in axes_centres:
+            axes_centres.discard(cle)                 # doit re-centrer pour re-binder
+            return classes.code_manette(idx, "axe", event.axis * 2 + (1 if v > 0 else 0))
+    return None
+
+
+def dessiner_manette_vue(centre_y):
+    """Petite ligne verte/grise 'Gamepad detected : ...' (aide au binding + debug)."""
+    ng, nomg = classes.manettes_detectees()
+    if ng:
+        txt = "Gamepad detected : %s%s" % (nomg or "controller",
+                                           "  (+%d more)" % (ng - 1) if ng > 1 else "")
+        col = (150, 210, 150)
+    else:
+        txt = "No gamepad detected  (keyboard only)"
+        col = (150, 150, 150)
+    f = pygame.font.SysFont("segoeui,arial", 22)
+    s = f.render(txt, True, col)
+    screen.blit(s, s.get_rect(center=(SCREEN_WIDTH // 2, centre_y)))
 
 
 def keybinds_menu(background_surface=None):
@@ -2462,9 +2637,11 @@ def keybinds_menu(background_surface=None):
         KEYBINDS[cote][action] = code
         sauver_settings()          # persistance immediate
 
+    _axes_centres = set()          # axes manette vus au repos (garde anti-gachette)
     classes.maj_manettes()         # ouvre les manettes -> leurs evenements arrivent
     while True:
         clock.tick(FPS)
+        gp_capture(rebind is not None)   # attente d'un bind -> A/B se bindent (pas clic/retour)
         mouse_pos = pygame.mouse.get_pos()
         mouse_clicked = False
         for event in pygame.event.get():
@@ -2477,25 +2654,15 @@ def keybinds_menu(background_surface=None):
                     rebind = None
                 elif event.key == pygame.K_ESCAPE:
                     return False
-            # MANETTE (optionnelle) : bouton, croix ou stick POUSSE A FOND se bindent
-            # comme une touche. Hors rebind, ces evenements sont simplement ignores.
+            # Branchement/debranchement a chaud (ouvre/ferme -> ses evenements arrivent).
+            elif event.type in (getattr(pygame, "JOYDEVICEADDED", -1),
+                                 getattr(pygame, "JOYDEVICEREMOVED", -2)):
+                classes.maj_manettes()
+            # MANETTE (optionnelle) : bouton/croix/axe se bindent comme une touche.
             elif rebind is not None and event.type in (pygame.JOYBUTTONDOWN,
                                                        pygame.JOYHATMOTION,
                                                        pygame.JOYAXISMOTION):
-                idx = classes.index_manette(getattr(event, "instance_id",
-                                                    getattr(event, "joy", 0)))
-                code = None
-                if idx is not None:
-                    if event.type == pygame.JOYBUTTONDOWN:
-                        code = classes.code_manette(idx, "btn", event.button)
-                    elif event.type == pygame.JOYHATMOTION:
-                        hx, hy = event.value
-                        d = 0 if hy > 0 else 1 if hy < 0 else 2 if hx < 0 else 3 if hx > 0 else None
-                        if d is not None:
-                            code = classes.code_manette(idx, "hat", d)
-                    elif abs(event.value) > 0.7:       # pousse VOLONTAIREMENT (pas un drift)
-                        code = classes.code_manette(idx, "axe",
-                                                    event.axis * 2 + (1 if event.value > 0 else 0))
+                code = capturer_manette(event, _axes_centres)
                 if code is not None:
                     _assigner(rebind, code)
                     rebind = None
@@ -2515,6 +2682,8 @@ def keybinds_menu(background_surface=None):
         hint = "Click an action, then press a key or a gamepad button  (Esc to cancel)"
         h = font_hint.render(hint, True, GRAY)
         screen.blit(h, h.get_rect(center=(SCREEN_WIDTH // 2, 165)))
+        # Diagnostic manette : indique si une manette est vue (aide au binding + debug).
+        dessiner_manette_vue(192)     # 'Gamepad detected : ...' (helper partage)
 
         # Si on clique en cours de rebind (hors saisie clavier), on annule.
         if rebind is not None and mouse_clicked:
@@ -2538,7 +2707,8 @@ def keybinds_menu(background_surface=None):
                 screen.blit(lbl, lbl.get_rect(midleft=(rect.left + 22, rect.centery)))
                 # touche a droite (dans une pastille)
                 texte = "..." if en_cours else nom_touche(KEYBINDS[cote][action])
-                kt = font_key.render(texte, True, BRAISE if en_cours else (224, 216, 198))
+                coul = BRAISE if en_cours else (couleur_bind(KEYBINDS[cote][action]) or (224, 216, 198))
+                kt = font_key.render(texte, True, coul)
                 pastille = pygame.Rect(0, 0, max(64, kt.get_width() + 34), 44)
                 pastille.midright = (rect.right - 18, rect.centery)
                 pygame.draw.rect(screen, (24, 21, 17), pastille, 0, 8)
@@ -2654,6 +2824,19 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
     rebind = None       # Keybinds : action en cours de reassignation
     drag = None         # Audio : slider en cours de glissement
     BRAISE = (210, 132, 56)
+    _axes_centres = set()          # axes manette vus au repos (garde anti-gachette)
+    classes.maj_manettes()         # ouvre les manettes -> leurs evenements arrivent
+
+    def _bind_touche(cible, code):
+        """Lie 'code' (clavier OU manette) a l'action ciblee ; une entree ne sert
+        qu'a UNE action (on delie l'ancienne si deja utilisee ailleurs)."""
+        cote, action = cible
+        for c in KEYBINDS:
+            for a in KEYBINDS[c]:
+                if KEYBINDS[c][a] == code and (c, a) != (cote, action):
+                    KEYBINDS[c][a] = None
+        KEYBINDS[cote][action] = code
+        sauver_settings()
 
     # Onglets de categorie (haut, horizontal)
     CATS = ["Display", "Keybinds", "Audio", "Credits"]
@@ -2664,8 +2847,9 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
         onglets[cat] = Button(_tx, TAB_Y, cat, TAB_W)
         _tx += TAB_W + TAB_GAP
     button_reset = Button(SCREEN_WIDTH - 200, TAB_Y + 12, "Reset", 150, 56)   # onglet Keybinds : plus petit, centre aligne aux onglets
-    button_apply = Button(SCREEN_WIDTH // 2 - 250, 790, "Apply", 230)     # bas (remontes du bord)
-    button_retour = Button(SCREEN_WIDTH // 2 + 20, 790, "Back", 230)
+    # Plus de bouton "Apply" : le mode d'affichage s'applique AU CLIC (comme l'audio /
+    # les touches qui sauvent deja immediatement) -> barre du bas allegee. Back = centre.
+    button_retour = Button(SCREEN_WIDTH // 2 - 115, 790, "Back", 230)
     button_reset_all = Button(90, 802, "Reset settings", 220, 56)         # remise a zero TOTALE : plus petit, centre aligne
     # Changelog (bas-droit, miroir de Reset settings) : ouvre les notes de version
     # GitHub dans le navigateur (l'historique complet des maj du jeu).
@@ -2707,23 +2891,30 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
         t_opt += 1
         mouse_pos = pygame.mouse.get_pos()
         mouse_clicked = False
+        # En attente d'un bind manette -> mode CAPTURE (A/B se bindent au lieu de cliquer/reculer).
+        gp_capture(onglet == "Keybinds" and rebind is not None)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return ("quitter", perso1, perso2)
             if event.type == pygame.KEYDOWN:
                 if onglet == "Keybinds" and rebind is not None:
                     if event.key != pygame.K_ESCAPE:           # Echap = annuler la saisie
-                        cote, action = rebind
-                        for c in KEYBINDS:
-                            for a in KEYBINDS[c]:
-                                if KEYBINDS[c][a] == event.key and (c, a) != (cote, action):
-                                    KEYBINDS[c][a] = None       # une touche ne sert qu'a 1 action
-                        KEYBINDS[cote][action] = event.key
-                        sauver_settings()
+                        _bind_touche(rebind, event.key)
                     rebind = None
                 elif event.key == pygame.K_ESCAPE:
                     sauver_settings()
                     return (retour_vers, perso1, perso2)
+            # Branchement a chaud d'une manette : (re)ouvre -> ses evenements arrivent.
+            elif event.type in (getattr(pygame, "JOYDEVICEADDED", -1),
+                                 getattr(pygame, "JOYDEVICEREMOVED", -2)):
+                classes.maj_manettes()
+            # MANETTE (optionnelle) : bouton/croix/axe se bindent comme une touche.
+            elif onglet == "Keybinds" and rebind is not None and event.type in (
+                    pygame.JOYBUTTONDOWN, pygame.JOYHATMOTION, pygame.JOYAXISMOTION):
+                _code = capturer_manette(event, _axes_centres)
+                if _code is not None:
+                    _bind_touche(rebind, _code)
+                    rebind = None
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mouse_clicked = True
             if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -2766,14 +2957,34 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
                 bouton.draw(screen)
                 if choix_fullscreen == est_fs:
                     pygame.draw.rect(screen, BRAISE, bouton.rect.inflate(14, 14), 3, 9)
-                if bouton.is_clicked(mouse_pos, mouse_clicked):
-                    choix_fullscreen = est_fs
+                if bouton.is_clicked(mouse_pos, mouse_clicked) and choix_fullscreen != est_fs:
+                    choix_fullscreen = est_fs               # APPLIQUE + SAUVE au clic (plus d'Apply)
+                    FULLSCREEN_MODE = est_fs
+                    appliquer_affichage(FULLSCREEN_MODE)
+                    SETTINGS["fullscreen"] = FULLSCREEN_MODE
+                    sauver_settings()
+            # --- Vitesse du curseur MANETTE dans les menus (slider, entre Display et Debug) ---
+            _gl = font_small.render("Gamepad cursor speed", True, (206, 196, 174))
+            screen.blit(_gl, _gl.get_rect(center=(SCREEN_WIDTH // 2, 522)))
+            GSX, GSW, GSY = SCREEN_WIDTH // 2 - 230, 460, 558
+            gval = SETTINGS.get("vitesse_curseur", 0.45)
+            pygame.draw.rect(screen, (40, 38, 34), (GSX, GSY - 6, GSW, 12), 0, 6)
+            pygame.draw.rect(screen, BRAISE, (GSX, GSY - 6, int(GSW * gval), 12), 0, 6)
+            pygame.draw.rect(screen, (120, 112, 98), (GSX, GSY - 6, GSW, 12), 2, 6)
+            gkx = GSX + int(GSW * gval)
+            gsv = drag == "gpcur" or (abs(mouse_pos[0] - gkx) <= 16 and abs(mouse_pos[1] - GSY) <= 18)
+            pygame.draw.circle(screen, (200, 124, 50) if gsv else (152, 140, 120), (gkx, GSY), 14)
+            pygame.draw.circle(screen, (26, 23, 18), (gkx, GSY), 14, 3)
+            if mouse_clicked and GSX - 20 <= mouse_pos[0] <= GSX + GSW + 20 and abs(mouse_pos[1] - GSY) <= 24:
+                drag = "gpcur"
+            if drag == "gpcur":
+                SETTINGS["vitesse_curseur"] = round(max(0.0, min(1.0, (mouse_pos[0] - GSX) / GSW)), 2)
             # --- Debug : cases a cocher (voir D_ITEMS) ; etat vif dans classes.DEBUG_AFFICHAGE,
             # lu partout (hitbox/damage box via debug_box, barres de cd) -> effet immediat.
             sub2 = font_small.render("Debug", True, (206, 196, 174))
-            screen.blit(sub2, sub2.get_rect(center=(SCREEN_WIDTH // 2, 570)))
+            screen.blit(sub2, sub2.get_rect(center=(SCREEN_WIDTH // 2, 598)))
             for i, (label, cle) in enumerate(D_ITEMS):
-                cy = 628 + i * 56
+                cy = 650 + i * 54
                 case = pygame.Rect(SCREEN_WIDTH // 2 - 220, cy - 17, 34, 34)
                 zone = pygame.Rect(case.x, case.y, 470, 34)   # case + label cliquables
                 actif = classes.DEBUG_AFFICHAGE[cle]
@@ -2790,7 +3001,7 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
             if rebind is not None and mouse_clicked:   # clic ailleurs = annule la saisie
                 rebind, mouse_clicked = None, False
             pygame.draw.line(screen, (140, 128, 110), (SCREEN_WIDTH // 2, 270),
-                             (SCREEN_WIDTH // 2, 762), 2)
+                             (SCREEN_WIDTH // 2, 720), 2)
             for cote, titre, cx in K_COLS:
                 tt = font_medium.render(titre, True, (216, 204, 178))
                 screen.blit(tt, tt.get_rect(center=(cx, 248)))
@@ -2804,7 +3015,8 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
                     lbl = f_lbl.render(label, True, (226, 220, 206))
                     screen.blit(lbl, lbl.get_rect(midleft=(rect.left + 22, rect.centery)))
                     texte = "..." if en_cours else nom_touche(KEYBINDS[cote][action])
-                    kt = f_key.render(texte, True, BRAISE if en_cours else (224, 216, 198))
+                    coul = BRAISE if en_cours else (couleur_bind(KEYBINDS[cote][action]) or (224, 216, 198))
+                    kt = f_key.render(texte, True, coul)
                     pastille = pygame.Rect(0, 0, max(64, kt.get_width() + 34), 42)
                     pastille.midright = (rect.right - 18, rect.centery)
                     pygame.draw.rect(screen, (24, 21, 17), pastille, 0, 8)
@@ -2812,6 +3024,12 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
                     screen.blit(kt, kt.get_rect(center=pastille.center))
                     if mouse_clicked and survol and rebind is None:
                         rebind = (cote, action)
+            # Aide + etat manette : EN BAS (les titres 'Player 1/2' en Old London 70px
+            # occupent tout l'espace du haut -> collision reglee en descendant ces lignes).
+            _kh = font_small.render("Click an action, then press a key or a gamepad button",
+                                    True, (176, 168, 150))
+            screen.blit(_kh, _kh.get_rect(center=(SCREEN_WIDTH // 2, 736)))
+            dessiner_manette_vue(766)                   # 'Gamepad detected : ...'
             button_reset.check_hover(mouse_pos)
             button_reset.draw(screen)
             if button_reset.is_clicked(mouse_pos, mouse_clicked):
@@ -2845,32 +3063,22 @@ def options(retour_vers, perso1="Kenshi", perso2="Lysandra", background_surface=
 
         elif onglet == "Credits":
             for i, (cat, qui) in enumerate(CREDITS):
-                cy = 312 + i * 88
+                cy = 300 + i * 76           # resserre (etait 312+88 -> debordait sur les boutons)
                 c = f_cred_cat.render(cat, True, (172, 164, 148))          # categorie (discrete)
-                screen.blit(c, c.get_rect(center=(SCREEN_WIDTH // 2, cy - 18)))
+                screen.blit(c, c.get_rect(center=(SCREEN_WIDTH // 2, cy - 16)))
                 n = f_cred_nom.render(qui, True, (226, 204, 152))          # credite (dore, lisible)
-                screen.blit(n, n.get_rect(center=(SCREEN_WIDTH // 2, cy + 18)))
-            merci = f_cred_cat.render("The Siege of Grimgate  -  thanks for playing !", True, (150, 142, 126))
-            screen.blit(merci, merci.get_rect(center=(SCREEN_WIDTH // 2, 312 + len(CREDITS) * 88 + 6)))
+                screen.blit(n, n.get_rect(center=(SCREEN_WIDTH // 2, cy + 16)))
 
-        # --- Apply / Back (bas) + Reset settings (bas-gauche) + Changelog (bas-droit) ---
-        button_apply.check_hover(mouse_pos)
+        # --- Back (centre) + Reset settings (bas-gauche) + Changelog (bas-droit) ---
         button_retour.check_hover(mouse_pos)
         button_reset_all.check_hover(mouse_pos)
         button_changelog.check_hover(mouse_pos)
-        button_apply.draw(screen)
         button_retour.draw(screen)
         button_reset_all.draw(screen)
         button_changelog.draw(screen)
         if button_changelog.is_clicked(mouse_pos, mouse_clicked):
             import webbrowser
             webbrowser.open("https://github.com/%s/releases" % GITHUB_REPO)
-        if button_apply.is_clicked(mouse_pos, mouse_clicked):
-            if choix_fullscreen != FULLSCREEN_MODE:
-                FULLSCREEN_MODE = choix_fullscreen
-                appliquer_affichage(FULLSCREEN_MODE)
-            SETTINGS["fullscreen"] = FULLSCREEN_MODE
-            sauver_settings()
         if button_reset_all.is_clicked(mouse_pos, mouse_clicked):
             fond = screen.copy()
             if confirmer("Reset all settings?", fond):
@@ -3824,16 +4032,24 @@ def jouer_round(personnage_1, personnage_2, scores, numero_round, rounds_to_win,
 
     while True:
         clock.tick(FPS)
-        for event in pygame.event.get():
+        # COMBAT : nav manette OFF le temps de lire les events (le combat lit la manette
+        # via lire_inputs/KEYBINDS) -> pas de clic/Echap parasite. On la REACTIVE juste
+        # apres, pour que la PAUSE (menu_pause) soit pilotable a la manette.
+        gp_nav(False); _evts = pygame.event.get(); gp_nav(True)
+        for event in _evts:
             if event.type == pygame.QUIT:
                 return ("quitter", personnage_1, personnage_2)
-            if event.type == pygame.KEYDOWN and not round_over:
-                if event.key == pygame.K_ESCAPE:
-                    if net is not None:
-                        return ("reseau_quitte", personnage_1, personnage_2)   # pas de pause en reseau
-                    resultat = menu_pause(personnage_1, personnage_2)
-                    if resultat[0] != JEU:
-                        return resultat
+            # Pause : Echap clavier OU bouton START de la manette (ni l'un ni l'autre en reseau).
+            _pause = (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE)
+            if event.type == pygame.JOYBUTTONDOWN:
+                _i = classes.index_manette(getattr(event, "instance_id", getattr(event, "joy", 0)))
+                _pause = _pause or (_i is not None and classes.manette_sem_btn(_i, event.button) == "start")
+            if _pause and not round_over:
+                if net is not None:
+                    return ("reseau_quitte", personnage_1, personnage_2)   # pas de pause en reseau
+                resultat = menu_pause(personnage_1, personnage_2)
+                if resultat[0] != JEU:
+                    return resultat
 
         # HITSTOP : au moment d'un impact, tout se fige quelques frames (persos,
         # chrono, fond) pour donner du poids au coup. On continue a dessiner.
@@ -4213,6 +4429,51 @@ _f_nom = pygame.font.Font("assets/fonts/OldLondon.ttf", 42)     # nom de session
 _f_corps = pygame.font.Font("assets/fonts/OldLondon.ttf", 32)   # texte courant
 _f_hint = pygame.font.Font("assets/fonts/OldLondon.ttf", 24)    # petites infos
 _f_sys = pygame.font.SysFont("consolas,segoeui,arial", 28, bold=True)   # code/IP : police CLASSIQUE lisible
+_f_clav = pygame.font.SysFont("segoeui,arial", 27, bold=True)   # touches du clavier a l'ecran
+
+# CLAVIER A L'ECRAN (saisie au pad/souris ; le clavier physique marche toujours). Chaque
+# rangee = une chaine ; la derniere rangee (Space / efface / OK) est geree a part.
+_CLAVIER_RANGS = ("1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM.-_")
+_CLAV_KW, _CLAV_KH, _CLAV_GAP = 78, 58, 8
+
+
+def _touche_clav(rect, txt, hover):
+    pygame.draw.rect(screen, (60, 54, 44) if hover else (40, 37, 32), rect, 0, 8)
+    pygame.draw.rect(screen, (210, 132, 56) if hover else (112, 102, 86), rect, 2, 8)
+    t = _f_clav.render(txt, True, (236, 226, 206))
+    screen.blit(t, t.get_rect(center=rect.center))
+
+
+def clavier_ecran(mouse, clic, cx, y0):
+    """Dessine un clavier a l'ecran centre en cx, haut a y0. Renvoie l'action de la touche
+    CLIQUEE (souris OU curseur manette) : un caractere, 'BACK' (efface), 'SPACE', 'OK', ou None.
+    Le caller filtre/valide le caractere comme pour le clavier physique."""
+    action = None
+    kw, kh, gap = _CLAV_KW, _CLAV_KH, _CLAV_GAP
+    for r, rang in enumerate(_CLAVIER_RANGS):
+        total = len(rang) * (kw + gap) - gap
+        x = cx - total // 2
+        y = y0 + r * (kh + gap)
+        for ch in rang:
+            rect = pygame.Rect(x, y, kw, kh)
+            hov = rect.collidepoint(mouse)
+            _touche_clav(rect, ch, hov)
+            if hov and clic:
+                action = ch
+            x += kw + gap
+    # Derniere rangee : Espace (large) / efface / OK.
+    y = y0 + len(_CLAVIER_RANGS) * (kh + gap)
+    specs = (("Space", "SPACE", 300), ("< Del", "BACK", 200), ("OK", "OK", 200))
+    total = sum(w for _, _, w in specs) + gap * (len(specs) - 1)
+    x = cx - total // 2
+    for lab, act, w in specs:
+        rect = pygame.Rect(x, y, w, kh)
+        hov = rect.collidepoint(mouse)
+        _touche_clav(rect, lab, hov)
+        if hov and clic:
+            action = act
+        x += w + gap
+    return action
 
 
 def _fond_multi(tick=0):
@@ -4308,10 +4569,11 @@ def menu_multijoueur():
 
 
 def ecran_nom_session(defaut):
-    """Saisie du nom de la session (cote hote). -> nom (str) ou None (annule)."""
-    p = pygame.Rect(0, 0, 820, 470); p.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
-    b_ok = Button(p.centerx - 255, p.bottom - 92, "Open to LAN", 245, 60)
-    b_back = Button(p.centerx + 15, p.bottom - 92, "Back", 240, 60)
+    """Saisie du nom de la session (cote hote), au clavier OU au clavier a l'ecran
+    (manette/souris). -> nom (str) ou None (annule)."""
+    p = pygame.Rect(0, 0, 960, 700); p.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+    b_ok = Button(p.centerx - 255, p.bottom - 82, "Open to LAN", 245, 60)
+    b_back = Button(p.centerx + 15, p.bottom - 82, "Back", 240, 60)
     nom = defaut; tick = 0
     while True:
         clock.tick(FPS); mouse = pygame.mouse.get_pos(); clic = False; entree = False; tick += 1
@@ -4323,8 +4585,13 @@ def ecran_nom_session(defaut):
                 elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER): entree = True
                 elif e.unicode and e.unicode.isprintable() and len(nom) < 24: nom += e.unicode
             if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1: clic = True
-        _panneau_multi("Host a game", tick=tick)
-        _champ_saisie(p, "Session name", nom, tick)
+        _panneau_multi("Host a game", taille=(960, 700), tick=tick)
+        _champ_saisie(p, "Session name", nom, tick, y=p.top + 176)
+        act = clavier_ecran(mouse, clic, p.centerx, p.top + 250)   # clavier a l'ecran (pad/souris)
+        if act == "BACK": nom = nom[:-1]
+        elif act == "SPACE" and len(nom) < 24: nom += " "
+        elif act == "OK": entree = True
+        elif act and len(nom) < 24: nom += act
         b_ok.check_hover(mouse); b_back.check_hover(mouse); b_ok.draw(screen); b_back.draw(screen)
         if b_back.is_clicked(mouse, clic): return None
         if (entree or b_ok.is_clicked(mouse, clic)) and nom.strip():
@@ -4445,10 +4712,16 @@ def ecran_rejoindre():
 
 def ecran_rejoindre_manuel():
     """Fallback : saisie d'un code de session OU d'une IP. -> SessionReseau ou None."""
-    p = pygame.Rect(0, 0, 820, 470); p.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
-    b_conn = Button(p.centerx - 255, p.bottom - 92, "Connect", 245, 60)
-    b_back = Button(p.centerx + 15, p.bottom - 92, "Back", 240, 60)
+    p = pygame.Rect(0, 0, 960, 700); p.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+    b_conn = Button(p.centerx - 255, p.bottom - 82, "Connect", 245, 60)
+    b_back = Button(p.centerx + 15, p.bottom - 82, "Back", 240, 60)
     saisie = ""; msg = ""; tick = 0
+
+    def _ajoute(c):
+        nonlocal saisie
+        if (c in "0123456789.-" or c.isalpha()) and len(saisie) < 21:
+            saisie += c.upper()
+
     while True:
         clock.tick(FPS); mouse = pygame.mouse.get_pos(); clic = False; entree = False; tick += 1
         for e in pygame.event.get():
@@ -4457,14 +4730,17 @@ def ecran_rejoindre_manuel():
                 if e.key == pygame.K_ESCAPE: return None
                 elif e.key == pygame.K_BACKSPACE: saisie = saisie[:-1]
                 elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER): entree = True
-                elif (e.unicode in "0123456789.-" or e.unicode.isalpha()) and len(saisie) < 21:
-                    saisie += e.unicode.upper()
+                elif e.unicode: _ajoute(e.unicode)
             if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1: clic = True
-        _panneau_multi("Join a game", tick=tick)
-        _champ_saisie(p, "Session code  or  IP address", saisie, tick)
+        _panneau_multi("Join a game", taille=(960, 700), tick=tick)
+        _champ_saisie(p, "Session code  or  IP address", saisie, tick, y=p.top + 176)
+        act = clavier_ecran(mouse, clic, p.centerx, p.top + 250)   # clavier a l'ecran (pad/souris)
+        if act == "BACK": saisie = saisie[:-1]
+        elif act == "OK": entree = True
+        elif act and act != "SPACE": _ajoute(act)
         if msg:
             m = _f_hint.render(msg, True, (222, 120, 95))
-            screen.blit(m, m.get_rect(center=(p.centerx, p.centery + 78)))
+            screen.blit(m, m.get_rect(center=(p.centerx, p.bottom - 130)))
         b_conn.check_hover(mouse); b_back.check_hover(mouse); b_conn.draw(screen); b_back.draw(screen)
         if b_back.is_clicked(mouse, clic): return None
         if (entree or b_conn.is_clicked(mouse, clic)) and saisie.strip():
@@ -5447,10 +5723,218 @@ def jouer_entrainement(perso):
         pygame.display.flip()                            # pas de curseur pendant le combat
 
 
+IDENTITE = None     # identite Discord connectee ({id, username, global_name, avatar}) ou None
+COMPTE = None       # dict de sauvegarde du compte actif (progression liee au compte)
+AVATAR_SURF = None  # avatar Discord pret a afficher (cercle + anneau, anti-aliase) ou None
+
+# L'encart compte est SUPERSAMPLE : rendu en _CARTE_SS x la taille finale puis reduit ->
+# bords/texte lisses malgre l'upscale 1600x900 -> moniteur (le jeu est rendu en 1600x900).
+_CARTE_SS = 2       # facteur de supersampling de la carte
+_AV_T = 64          # diametre AFFICHE de l'avatar (dans le canevas 1600x900)
+
+
+def _avatar_rond(img, taille):
+    """Avatar recadre en CERCLE avec anneau dore, ANTI-ALIASE (rendu x4 puis reduit).
+    img=None -> disque de repli. 'taille' = diametre final voulu."""
+    SS = 4
+    G = taille * SS
+    r = G // 2
+    ep = max(2, round(taille * 0.05)) * SS          # epaisseur de l'anneau
+    di = G - 2 * ep                                  # diametre interieur (l'image)
+    out = pygame.Surface((G, G), pygame.SRCALPHA)
+    pygame.draw.circle(out, (198, 162, 92), (r, r), r)             # anneau (disque de fond dore)
+    if img is not None:
+        im = pygame.transform.smoothscale(img.convert_alpha(), (di, di))
+    else:
+        im = pygame.Surface((di, di), pygame.SRCALPHA)
+        pygame.draw.circle(im, (74, 66, 56), (di // 2, di // 2), di // 2)
+    masque = pygame.Surface((di, di), pygame.SRCALPHA)
+    pygame.draw.circle(masque, (255, 255, 255, 255), (di // 2, di // 2), di // 2)
+    disque = pygame.Surface((di, di), pygame.SRCALPHA)
+    disque.blit(im, (0, 0))
+    disque.blit(masque, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    out.blit(disque, (ep, ep))
+    return pygame.transform.smoothscale(out, (taille, taille))
+
+
+def _charger_avatar(identite):
+    """Prepare la PHOTO DE PROFIL Discord (cercle + anneau, x2 pour le supersampling).
+    MISE EN CACHE LOCALE (Scripts/.cache) : telecharge une seule fois par avatar (hash) ->
+    relances instantanees et ca marche HORS LIGNE. Renvoie toujours une Surface (repli disque)."""
+    img = None
+    cid, av = str(identite.get("id", "")), identite.get("avatar")
+    if av:
+        cle = "%s_%s" % (cid, av)
+        url = "https://cdn.discordapp.com/avatars/%s/%s.png?size=256" % (cid, av)
+    else:                           # pas d'avatar custom -> avatar par defaut Discord
+        n = (int(cid) >> 22) % 6 if cid.isdigit() else 0
+        cle = "def_%d" % n
+        url = "https://cdn.discordapp.com/embed/avatars/%d.png" % n
+    cache = os.path.join(_dossier_script, ".cache", "avatar_%s.png" % cle)
+    try:
+        if os.path.isfile(cache):                       # deja en cache -> pas de reseau
+            img = pygame.image.load(cache)
+        else:
+            import io, urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": "TSOG"})
+            with urllib.request.urlopen(req, timeout=6) as r:
+                data = r.read()
+            try:                                        # ecrit le cache (best-effort)
+                os.makedirs(os.path.dirname(cache), exist_ok=True)
+                with open(cache, "wb") as f:
+                    f.write(data)
+            except OSError:
+                pass
+            img = pygame.image.load(io.BytesIO(data))
+    except Exception:
+        img = None
+    return _avatar_rond(img, _AV_T * _CARTE_SS)
+
+
+def ecran_login():
+    """CONNEXION DISCORD OBLIGATOIRE au lancement (facon appli) : 'Login with Discord' ouvre le
+    navigateur, le joueur autorise, on lie la sauvegarde a son compte. Pas de mode invite.
+    Remplit IDENTITE / COMPTE / AVATAR_SURF. Renvoie True (continuer) ou False (quitter le jeu).
+    Navigable a la manette (curseur virtuel actif partout)."""
+    global IDENTITE, COMPTE, AVATAR_SURF
+    # RECONNEXION AUTO : si un compte a deja ete connecte, on le reprend directement
+    # (sauvegarde locale -> pas besoin de re-OAuth). Deconnexion possible via l'encart du menu.
+    _prec = sauvegarde.derniere_identite()
+    if _prec is not None:
+        IDENTITE = _prec
+        COMPTE = sauvegarde.connecter(IDENTITE)
+        AVATAR_SURF = _charger_avatar(IDENTITE)
+        _greeting("Welcome back, %s!" % sauvegarde.nom_affiche(IDENTITE))
+        return True
+    cx = SCREEN_WIDTH // 2
+    b_action = Button(cx - 250, 486, "Login with Discord", 500, 92)   # login OU retry
+    b_quit = Button(cx - 110, 616, "Quit", 220, 52); b_quit.muet = True
+    b_cancel = Button(cx - 140, 596, "Cancel", 280, 58)
+    f_info = pygame.font.SysFont("segoeui,arial", 30)
+    f_sub = pygame.font.SysFont("segoeui,arial", 24)
+    tick = 0
+    while True:
+        clock.tick(FPS); tick += 1
+        mouse = pygame.mouse.get_pos(); clic = False
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                return False
+            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                clic = True
+        _fond_multi(tick)
+        if LOGO_MENU is not None:
+            blit_alpha(screen, LOGO_MENU, LOGO_MENU.get_rect(center=(cx, 236)), 255)
+        st = discord_login.etat_login()
+
+        if st == "attente":                       # connexion en cours
+            for i, ligne in enumerate(("Waiting for Discord...",
+                                       "Approve the request in your browser.")):
+                _t = f_info.render(ligne, True, (222, 214, 196) if i == 0 else (176, 168, 150))
+                screen.blit(_t, _t.get_rect(center=(cx, 486 + i * 42)))
+            b_cancel.check_hover(mouse); b_cancel.draw(screen)
+            if b_cancel.is_clicked(mouse, clic):
+                discord_login.annuler_login()
+
+        elif st == "ok":                          # connecte -> accueil + on continue
+            IDENTITE = discord_login.identite()
+            COMPTE = sauvegarde.connecter(IDENTITE)
+            AVATAR_SURF = _charger_avatar(IDENTITE)
+            _greeting("Welcome, %s!" % sauvegarde.nom_affiche(IDENTITE))
+            return True
+
+        else:                                     # idle / echec / annule
+            if st == "echec":
+                _e = f_sub.render("Login failed - please try again.", True, (226, 152, 132))
+                screen.blit(_e, _e.get_rect(center=(cx, 452)))
+                b_action.text = "Retry"
+            else:
+                _s = f_sub.render("Sign in with Discord to play", True, (206, 196, 174))
+                screen.blit(_s, _s.get_rect(center=(cx, 452)))
+                b_action.text = "Login with Discord"
+            b_action.check_hover(mouse); b_action.draw(screen)
+            if b_action.is_clicked(mouse, clic):
+                discord_login.demarrer_login()
+            b_quit.check_hover(mouse); b_quit.draw(screen)
+            if b_quit.is_clicked(mouse, clic):
+                return False                      # quitter le jeu (pas de jeu sans compte)
+
+        dessiner_curseur(screen)
+        pygame.display.flip()
+
+
+def _greeting(texte, frames=48):
+    """Petit ecran d'accueil ('Welcome, <pseudo>!') ~1,6 s."""
+    f = pygame.font.SysFont("segoeui,arial", 46, bold=True)
+    cx = SCREEN_WIDTH // 2
+    for t in range(frames):
+        clock.tick(FPS)
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN):
+                return
+        _fond_multi(t)
+        if LOGO_MENU is not None:
+            blit_alpha(screen, LOGO_MENU, LOGO_MENU.get_rect(center=(cx, 236)), 255)
+        s = f.render(texte, True, (232, 210, 158))
+        s.set_alpha(min(255, t * 12))
+        screen.blit(s, s.get_rect(center=(cx, 500)))
+        dessiner_curseur(screen)
+        pygame.display.flip()
+
+
+# Polices de l'encart rendues a l'echelle SUPERSAMPLEE (_CARTE_SS) : la carte entiere est
+# composee en x2 puis reduite -> texte lisse (SSAA) et plus lisible malgre l'upscale du jeu.
+_f_carte = pygame.font.Font("assets/fonts/OldLondon.ttf", 42 * _CARTE_SS)   # pseudo
+_f_carte_sub = pygame.font.SysFont("segoeui,arial", 17 * _CARTE_SS)         # label "Signed in"
+
+
+def dessiner_carte_compte(surface, x=52, y=22):
+    """Encart COMPTE DISCORD en haut a gauche du menu : photo de profil (cercle + anneau) +
+    pseudo dans un cadre. Compose en _CARTE_SS x puis reduit (bords/texte anti-aliases).
+    Cliquable -> deconnexion. Renvoie son Rect (pour la detection du clic) ou None."""
+    if IDENTITE is None:
+        return None
+    SS = _CARTE_SS
+    av = AVATAR_SURF if AVATAR_SURF is not None else _avatar_rond(None, _AV_T * SS)
+    txt = _f_carte.render(sauvegarde.nom_affiche(IDENTITE), True, (240, 228, 204))
+    pad = 16 * SS
+    gap = 15 * SS
+    av_t = _AV_T * SS
+    # rect final (a l'echelle ecran) pour tester le survol AVANT de choisir le sous-titre
+    sub_probe = _f_carte_sub.render("Signed in", True, (172, 162, 142))
+    larg = pad + av_t + gap + max(txt.get_width(), sub_probe.get_width()) + pad
+    haut = pad + av_t + pad
+    rect = pygame.Rect(x, y, larg // SS, haut // SS)
+    survol = rect.collidepoint(pygame.mouse.get_pos())
+    sub = _f_carte_sub.render("Log out" if survol else "Signed in", True,
+                              (226, 196, 150) if survol else (172, 162, 142))
+    # composition a l'echelle SS (fond sombre translucide + double liseré doré)
+    carte = pygame.Surface((larg, haut), pygame.SRCALPHA)
+    rc = carte.get_rect()
+    pygame.draw.rect(carte, (26, 20, 15, 224) if survol else (18, 15, 12, 214), rc,
+                     border_radius=16 * SS)
+    pygame.draw.rect(carte, (214, 176, 100, 240) if survol else (150, 120, 60, 236), rc,
+                     width=2 * SS, border_radius=16 * SS)
+    carte.blit(av, (pad, pad))
+    # bloc texte centre verticalement sur la hauteur de l'avatar
+    tx = pad + av_t + gap
+    bloc_h = txt.get_height() + sub.get_height() - 6 * SS
+    ty = (haut - bloc_h) // 2
+    carte.blit(txt, (tx, ty))
+    carte.blit(sub, (tx, ty + txt.get_height() - 6 * SS))
+    # reduction 1/SS -> anti-aliasing global, puis pose sur l'ecran
+    carte = pygame.transform.smoothscale(carte, (larg // SS, haut // SS))
+    surface.blit(carte, (x, y))
+    return rect
+
+
 def main():
     global BRUME_DISPERSE
     # Animation de lancement : logo du studio Ephyria (une seule fois au demarrage)
     if splash_studio() == "quitter":
+        pygame.quit()
+        return
+
+    if not ecran_login():   # connexion Discord OBLIGATOIRE avant le menu (sinon on quitte)
         pygame.quit()
         return
 
